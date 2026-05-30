@@ -1,0 +1,10 @@
+node_modules/
+dist/
+coverage/
+*.log
+.DS_Store
+
+# aider / agent artifacts
+.aider*
+.env
+check-directory.js

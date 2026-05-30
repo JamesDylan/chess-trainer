@@ -1,0 +1,20 @@
+{
+  "name": "chess-trainer",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Offline chess trainer: play vs Stockfish, puzzles, analysis, coaching. Stage 0 = engine-less, fully unit-tested core library.",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck && npm run test"
+  },
+  "dependencies": {
+    "chess.js": "^1.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3",
+    "vitest": "^4.1.7"
+  }
+}
