@@ -1,8 +1,10 @@
 # SPEC — Stage 1: Play vs Engine
 
-**Status:** engine core landed and verified. Board UI + game persistence are
-deferred to the next session (see "Deferred" below). Stage 0 is untouched and
-stays green.
+**Status:** COMPLETE. Engine core (previous session) + board UI and game
+persistence (this session) are landed. You can play full games vs the engine at
+adjustable strength in the browser, checkmate/draw is detected, and games persist.
+Stage 0 is untouched and stays green. See "Delivered this session" below for the
+UI/persistence build and the acceptance checklist.
 
 **Goal of the full stage (from the build plan):** wire a real Stockfish behind a
 swappable engine interface, drive a `chessground` board, play a full game vs the
@@ -95,23 +97,103 @@ browser (UI session) we'll serve a WASM build from a Web Worker via Vite.
 
 ---
 
-## Deferred to the next session (UI + persistence)
+## Delivered this session (UI + persistence)
 
-The vertical slice that makes this *visible and playable*:
+The vertical slice that makes Stage 1 *visible and playable*. All new code is the
+UI/persistence layers + one new engine transport; **nothing in `src/core/` or
+`src/engine/{types,uciEngine,strengthCommands,nodeEngine}.ts` changed signatures**,
+and the existing tests are untouched.
 
-1. **Board UI** — recommendation: **vanilla TS + Vite + `chessground`** (no
-   framework). Lightest footprint and the cleanest path to Tauri packaging at
-   Stage 6, matching the build plan's wording.
-2. **`WorkerUciTransport`** — a browser Web Worker wrapping a WASM Stockfish build,
-   implementing the *same* `UciTransport` interface. The `UciEngine`, strength
-   mapping, and Stage 0 core are reused unchanged. (`tsconfig` already includes
-   the DOM/WebWorker libs.)
-3. **Game persistence** — recommendation: a `GameRepository` interface backed by
-   **raw IndexedDB** (no new dependency), swappable to SQLite behind the same
-   interface at Stage 6. Store PGN + result + the strength played.
-4. **Game-over UX** — surface `ChessGame.result()` / checkmate / draw in the UI.
-5. **Acceptance to finish the stage:** play a full game at 3 strengths in the
-   browser; confirm it works offline after `vite build`.
+- **Board UI** — vanilla TS + Vite + `chessground` (no framework), as recommended.
+  - `index.html` + `vite.config.ts` (Vite entry; `base: './'` for portable assets).
+  - `src/web/boardView.ts` — the only file that touches chessground's types; the
+    rest of the app speaks plain squares (`"e2"`) and a `Map<string,string[]>` of
+    legal destinations.
+  - `src/web/legalDests.ts` — pure `fen -> { dests, isPromotion, inCheck }` via
+    chess.js, *view-only* (ChessGame stays the single source of truth for state;
+    both derive from the same FEN each turn, so they can't drift).
+  - `src/web/gameController.ts` — orchestrates ChessGame + UciEngine + board +
+    repo. Adjustable strength via `eloToEngineOptions`; game-over via
+    `ChessGame.result()` (checkmate/draw surfaced in the status line).
+  - `src/web/promotion.ts` — minimal promotion picker (Q/R/B/N).
+  - `src/web/main.ts` + `styles.css` — DOM, strength/side controls, status,
+    saved-games list.
+- **`WorkerUciTransport`** (`src/engine/workerEngine.ts`) — the browser twin of
+  `NodeUciTransport`: a classic Web Worker running a WASM Stockfish build, wired
+  via `postMessage`/`onmessage`/`terminate`, implementing the **existing**
+  `UciTransport` interface. `createWorkerEngine(url)` mirrors `createNodeEngine`.
+  `UciEngine`, `buildStrengthCommands`, `eloToEngineOptions`, and `ChessGame` are
+  reused unchanged. Exported from `src/engine/index.ts`.
+- **Engine build & serving** — `scripts/copy-engine.mjs` copies the prebuilt
+  `stockfish-18-lite-single.{js,wasm}` (and the threaded `lite` build, for later)
+  from `node_modules/stockfish/bin` into `public/sf/` (git-ignored), so Vite serves
+  them verbatim. The `.wasm` sits next to its `.js` because the nmrugg worker
+  derives the wasm URL from its own filename. **lite-single is single-threaded → no
+  SharedArrayBuffer → no COOP/COEP headers needed.** Wired into `predev`/`prebuild`.
+- **Persistence** (`src/persistence/`) — a `GameRepository` interface
+  (save/update/list/get/delete/clear) over **raw IndexedDB**
+  (`IndexedDbGameRepository`, no new dependency), plus an `InMemoryGameRepository`
+  used for the contract tests and as a fallback. Stores PGN + result + strength
+  played + date + human color + an `inProgress` flag. Swappable to SQLite behind
+  the same interface at S6.
+  - **Finished games** auto-save when the board reaches a terminal position; they
+    show in the saved-games list with **View** (replays the final position).
+  - **Save / Resume / Resign** (added after first playtest): **Save** keeps the
+    current unfinished game (`inProgress: true`); **Resume** reloads it into a
+    *playable* state from the list; **Resign** concedes (engine wins) and persists
+    it as finished. Starting or resuming another game auto-preserves the current
+    unfinished one via `update()` (upsert by id), so a game is never silently lost.
+    Delete / Clear all manage the list.
+- **Zero-illegal-move gate (in the UI)** — every engine `bestmove` is applied to
+  `ChessGame`; if `move()` returns false the move is rejected, play halts, and the
+  illegal move + FEN are shown loudly (see `engineMove()` in `gameController.ts`).
 
-New deps for the next session: `vite`, `chessground` (and the WASM `stockfish`
-build is already a dependency).
+### New unit tests (kept fast, no WASM; never touched existing tests)
+- `test/workerTransport.test.ts` — WorkerUciTransport mapping + a full
+  handshake→bestmove driven through the seam with a scripted fake worker.
+- `test/legalDests.test.ts` — dests counts, promotion flagging, check handling.
+- `test/gameRepository.test.ts` — the GameRepository contract via InMemory.
+
+New deps added this session: `vite`, `chessground` (WASM `stockfish` was already a
+dependency). Total: `npm test` = **67 passed** (Stage 0's 43 + 12 engine units + 12
+new). The IndexedDB store is exercised by the manual browser run, not `npm test`.
+
+## How to run the UI (on the Mac)
+
+```
+npm install            # adds vite + chessground; pulls the stockfish builds
+npm run dev            # predev copies the engine into public/sf, then Vite serves
+# open the printed http://localhost:5173 URL
+```
+
+Offline production build + serve:
+```
+npm run build          # prebuild copies the engine; outputs a self-contained dist/
+npm run preview        # serve dist/ locally — disconnect from the network to prove offline
+```
+
+`dist/` after build is fully self-contained: `index.html`, one JS + one CSS bundle,
+and `sf/stockfish-18-lite-single.{js,wasm}` (+ the `lite` build). No network at
+runtime — the engine loads the local `.wasm` from same-origin.
+
+## Acceptance checklist (the human step)
+
+- [ ] Play a **full game** vs the engine at **800**, **1200**, and **1600** Elo
+      (pick each in the Strength dropdown, click New game).
+- [ ] **Zero illegal engine moves** — if the engine ever returns an illegal move,
+      the status bar turns red and names the move + FEN. It should never happen.
+- [ ] **Strengths feel different** over a full game at real movetimes (800 should
+      blunder; 1600 should punish). Engine "Elo" is CCRL-anchored, not human (REF
+      §3) — if low ratings still feel too sharp, inject extra randomness later.
+- [ ] **Checkmate/draw** is detected and the result is shown and saved.
+- [ ] **Persistence** — finished games appear under "Saved games"; reload the page
+      and they're still there; "View" replays the final position.
+- [ ] **Save / Resume / Resign** — Save a mid-game, reload the page, Resume it and
+      keep playing; Resign ends a game as a loss and saves it; starting a new game
+      mid-play preserves the old one (it appears as "in progress").
+- [ ] **Offline** — `npm run build && npm run preview`, then kill the network and
+      confirm a new game still works end to end.
+
+To try the stronger threaded engine later: set `ENGINE_FILE` in
+`src/web/config.ts` to `'stockfish-18-lite.js'` AND serve with COOP/COEP headers
+(it needs SharedArrayBuffer). lite-single is the safe default that needs neither.

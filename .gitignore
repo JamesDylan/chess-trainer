@@ -4,7 +4,12 @@ coverage/
 *.log
 .DS_Store
 
+# Stockfish engine binaries: copied into public/sf by scripts/copy-engine.mjs
+# (regenerated from node_modules on predev/prebuild) — don't commit the ~14MB.
+public/sf/
+
 # aider / agent artifacts
 .aider*
 .env
 check-directory.js
+.verify/

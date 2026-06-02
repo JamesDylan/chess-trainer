@@ -6,3 +6,7 @@ export * from './types';
 export { buildStrengthCommands } from './strengthCommands';
 export { UciEngine } from './uciEngine';
 export { NodeUciTransport, createNodeEngine } from './nodeEngine';
+// Browser twin of NodeUciTransport (Web Worker + WASM Stockfish). Importing it is
+// side-effect free; the worker/engine is only created when createWorkerEngine runs.
+export { WorkerUciTransport, createWorkerEngine } from './workerEngine';
+export type { WorkerLike } from './workerEngine';

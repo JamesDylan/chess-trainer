@@ -3,8 +3,14 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Offline chess trainer: play vs Stockfish, puzzles, analysis, coaching. Stage 0 = engine-less, fully unit-tested core library.",
+  "description": "Offline chess trainer: play vs Stockfish, puzzles, analysis, coaching. Stage 1 = play vs engine in the browser (chessground board + WASM Stockfish in a Web Worker) with game persistence.",
   "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "copy-engine": "node scripts/copy-engine.mjs",
+    "predev": "node scripts/copy-engine.mjs",
+    "prebuild": "node scripts/copy-engine.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
@@ -13,10 +19,12 @@
   },
   "dependencies": {
     "chess.js": "^1.0.0",
+    "chessground": "^9.2.1",
     "stockfish": "^18.0.7"
   },
   "devDependencies": {
     "typescript": "^5.6.3",
+    "vite": "^8.0.0",
     "vitest": "^4.1.7"
   }
 }
