@@ -7,11 +7,11 @@
 
 import type { GameReport, MoveAnalysis } from '../analysis/types';
 import type { MoveClass, Score } from '../core/types';
-import type { Side } from './boardView';
+import type { Side, BoardShape } from './boardView';
 
 export interface AnalysisViewCallbacks {
-  /** Drive the shared board to a position (with an optional last-move highlight). */
-  onShowPosition(fen: string, lastMove?: [string, string]): void;
+  /** Drive the shared board to a position (last-move highlight + best-move arrows). */
+  onShowPosition(fen: string, lastMove?: [string, string], shapes?: BoardShape[]): void;
   /** User closed the analysis panel. */
   onClose(): void;
   /** User asked to cancel an in-progress analysis. */
@@ -221,6 +221,9 @@ export class AnalysisView {
   }
 
   private buildStepper(): HTMLElement {
+    const wrap = document.createElement('div');
+    wrap.className = 'analysis-stepper-wrap';
+
     const bar = document.createElement('div');
     bar.className = 'analysis-stepper';
     bar.append(
@@ -235,7 +238,14 @@ export class AnalysisView {
       button('▶', () => this.goTo(this.currentPly + 1), 'step'),
       button('⏭', () => this.goTo(this.report ? this.report.moves.length : 0), 'step'),
     );
-    return bar;
+
+    // Best-move detail line (updated on every step).
+    const detail = document.createElement('div');
+    detail.className = 'analysis-detail';
+    detail.id = 'analysis-detail';
+
+    wrap.append(bar, detail);
+    return wrap;
   }
 
   private buildScoresheet(report: GameReport): HTMLElement {
@@ -261,7 +271,8 @@ export class AnalysisView {
     const td = document.createElement('td');
     td.className = 'sheet-move';
     const meta = CLASS_META[m.classification];
-    td.title = `${meta.label} · ${m.accuracy.toFixed(1)}% accuracy · eval ${evalText(m)}`;
+    const bestNote = !m.isBest && m.bestMoveSan ? ` · best ${m.bestMoveSan}` : '';
+    td.title = `${meta.label} · ${m.accuracy.toFixed(1)}% accuracy · eval ${evalText(m)}${bestNote}`;
 
     const dot = document.createElement('span');
     dot.className = 'sheet-dot';
@@ -289,14 +300,15 @@ export class AnalysisView {
     this.currentPly = Math.max(0, Math.min(n, ply));
 
     const { fen, lastMove } = this.positionFor(this.currentPly);
-    this.cb.onShowPosition(fen, lastMove);
+    this.cb.onShowPosition(fen, lastMove, this.shapesFor(this.currentPly));
 
     // Highlight the active move cell.
     for (const [p, cell] of this.cellByPly) cell.classList.toggle('active', p === this.currentPly);
 
-    // Update the ply label.
+    // Update the ply label + the best-move detail line.
     const label = this.root.querySelector<HTMLSpanElement>('#analysis-ply-label');
     if (label) label.textContent = this.plyLabel(this.currentPly);
+    this.updateDetail(this.currentPly);
 
     // Move the sparkline marker.
     if (this.marker) {
@@ -326,6 +338,40 @@ export class AnalysisView {
     const dots = m.mover === 'white' ? '.' : '…';
     const meta = CLASS_META[m.classification];
     return `${m.moveNumber}${dots} ${m.san} · ${meta.label} · ${m.accuracy.toFixed(0)}%`;
+  }
+
+  /** A green arrow for the engine's best move, shown when the played move wasn't best. */
+  private shapesFor(ply: number): BoardShape[] {
+    if (!this.report || ply === 0) return [];
+    const m = this.report.moves[ply - 1];
+    if (!m.isBest && m.bestMoveUci && m.bestMoveUci.length >= 4) {
+      return [{ orig: m.bestMoveUci.slice(0, 2), dest: m.bestMoveUci.slice(2, 4), brush: 'green' }];
+    }
+    return [];
+  }
+
+  /** Update the "best move" detail line under the stepper for the given ply. */
+  private updateDetail(ply: number): void {
+    const el = this.root.querySelector<HTMLDivElement>('#analysis-detail');
+    if (!el) return;
+    el.replaceChildren();
+    if (!this.report || ply === 0) return;
+    const m = this.report.moves[ply - 1];
+    if (m.isBest) {
+      const span = document.createElement('span');
+      span.className = 'detail-best';
+      span.textContent = `★ Best move — ${m.san}`;
+      el.appendChild(span);
+      return;
+    }
+    if (m.bestMoveSan) {
+      const played = document.createElement('span');
+      played.textContent = `You played ${m.san}. `;
+      const best = document.createElement('span');
+      best.className = 'detail-suggest';
+      best.textContent = `Best: ${m.bestMoveSan}`;
+      el.append(played, best);
+    }
   }
 
   private attachKeys(): void {

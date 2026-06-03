@@ -226,3 +226,38 @@ button.step { padding: 4px 10px; font-size: 0.95rem; min-width: 38px; }
 .sheet-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
 .sheet-san { font-weight: 600; }
 .sheet-eval { margin-left: auto; color: var(--muted); font-variant-numeric: tabular-nums; font-size: 0.78rem; }
+
+/* Best-move detail line under the stepper */
+.analysis-stepper-wrap { margin-bottom: 10px; }
+.analysis-stepper { margin-bottom: 4px; }
+.analysis-detail {
+  min-height: 1.2em;
+  text-align: center;
+  font-size: 0.84rem;
+  color: var(--muted);
+}
+.detail-best { color: var(--ok); font-weight: 600; }
+.detail-suggest { color: var(--ok); font-weight: 600; }
+
+/* --- Side-by-side layout: board | report (only while analysing) ----------- */
+/* Default (play / no analysis) stays single-column and centred, unchanged. */
+.layout.analyzing { max-width: 1080px; }
+.layout.analyzing .play-area {
+  display: flex;
+  gap: 18px;
+  align-items: flex-start;
+}
+.layout.analyzing .board-wrap {
+  flex: 0 0 auto;
+  position: sticky; /* board stays in view while the report scrolls */
+  top: 12px;
+}
+.layout.analyzing .analysis-root { flex: 1 1 auto; min-width: 0; }
+.layout.analyzing .analysis { margin-top: 0; }
+
+/* Narrow screens: stack the report under the board (no sticky). */
+@media (max-width: 880px) {
+  .layout.analyzing { max-width: 560px; }
+  .layout.analyzing .play-area { flex-direction: column; }
+  .layout.analyzing .board-wrap { position: static; }
+}

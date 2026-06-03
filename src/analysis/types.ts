@@ -58,6 +58,12 @@ export interface MoveAnalysis {
   classification: MoveClass;
   /** Mover-POV centipawn loss (>= 0), used for ACPL. */
   cpLoss: number;
+  /** The engine's best move at `fenBefore`, as UCI (for the board suggestion arrow). */
+  bestMoveUci?: string;
+  /** The engine's best move at `fenBefore`, as SAN (for display). */
+  bestMoveSan?: string;
+  /** True when the move played equals the engine's best move. */
+  isBest: boolean;
 }
 
 /** Counts of each move class for one player. */
@@ -85,6 +91,8 @@ export interface PlayerReport {
 
 /** The full analysis report for one game. */
 export interface GameReport {
+  /** Report schema version (bump to invalidate cached reports after a format change). */
+  version: number;
   /** PGN this report was computed from (used to invalidate a cached report). */
   pgn: string;
   /** Final result of the game as analysed. */

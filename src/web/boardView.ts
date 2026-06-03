@@ -6,8 +6,17 @@ import { Chessground } from 'chessground';
 import type { Api } from 'chessground/api';
 import type { Config } from 'chessground/config';
 import type { Key, Dests } from 'chessground/types';
+import type { DrawShape } from 'chessground/draw';
 
 export type Side = 'white' | 'black';
+
+/** A board arrow/marker (e.g. the engine's best move). `brush` is a chessground
+ *  brush name: 'green' | 'red' | 'blue' | 'yellow'. */
+export interface BoardShape {
+  orig: string;
+  dest?: string;
+  brush: string;
+}
 
 const START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
 
@@ -23,6 +32,8 @@ export interface BoardState {
   lastMove?: [string, string];
   /** Highlight the side-to-move's king when in check. */
   inCheck?: boolean;
+  /** Arrows/markers to draw (e.g. the engine's best move during review). */
+  shapes?: BoardShape[];
 }
 
 export class BoardView {
@@ -65,6 +76,12 @@ export class BoardView {
         dests: state.dests as unknown as Dests,
       },
     });
+    // App-managed arrows (replaced every render; empty clears them during play).
+    this.api.setAutoShapes(
+      (state.shapes ?? []).map(
+        (s): DrawShape => ({ orig: s.orig as Key, dest: s.dest as Key | undefined, brush: s.brush }),
+      ),
+    );
   }
 
   setOrientation(orientation: Side): void {

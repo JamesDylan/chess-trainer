@@ -20,7 +20,7 @@ import type { GameResult } from '../core/types';
 import type { UciEngine } from '../engine/uciEngine';
 import type { GameRepository, SavedGame } from '../persistence/types';
 import { computeMoves } from './legalDests';
-import { BoardView, type Side } from './boardView';
+import { BoardView, type Side, type BoardShape } from './boardView';
 import { pickPromotion } from './promotion';
 
 export type StatusKind = 'info' | 'thinking' | 'gameover' | 'error';
@@ -162,7 +162,7 @@ export class GameController {
    */
   reviewPosition(
     fen: string,
-    opts: { lastMove?: [string, string]; orientation?: Side } = {},
+    opts: { lastMove?: [string, string]; orientation?: Side; shapes?: BoardShape[] } = {},
   ): void {
     this.generation++; // discard any in-flight engine reply from the live game
     // Use a DEDICATED flag (not `viewing`): board review must not alter the live
@@ -180,6 +180,7 @@ export class GameController {
       dests: new Map(),
       lastMove: opts.lastMove,
       inCheck,
+      shapes: opts.shapes,
     });
   }
 

@@ -9,7 +9,7 @@ import { ChessGame } from '../src/core/chessGame';
 import { UciEngine } from '../src/engine/uciEngine';
 import { scoreToWinPercent, winPercentToAccuracy, classifyMove } from '../src/core/evalMath';
 import type { Score } from '../src/core/types';
-import { analyzeGame, inferLastMove } from '../src/analysis/analyzer';
+import { analyzeGame, inferLastMove, ANALYSIS_REPORT_VERSION } from '../src/analysis/analyzer';
 import { FakeTransport } from './helpers/fakeTransport';
 import { scriptedAnalysisResponder } from './helpers/scriptedAnalysisEngine';
 
@@ -162,6 +162,43 @@ describe('analyzeGame — mate scores and terminal positions', () => {
     expect(mate.winAfter).toBe(100);
     expect(mate.accuracy).toBe(100);
     expect(mate.classification).toBe('best');
+  });
+});
+
+describe('analyzeGame — best move capture', () => {
+  // Script the engine's best move per position so we can assert both the
+  // "played the best move" and "played a non-best move" cases.
+  const moves = ['e4', 'e5', 'Nf3', 'Nc6'];
+  const { pgn, fens } = buildGame(moves); // fens: P0..P4
+
+  const bestByFen = new Map<string, string>([
+    [fens[0], 'e2e4'], // start: best is e4 — and White played e4 (best)
+    [fens[1], 'b8c6'], // after e4: best is Nc6, but Black played e5 (not best)
+  ]);
+
+  it('records the engine best move (UCI + SAN) and whether the played move was best', async () => {
+    const transport = new FakeTransport(
+      scriptedAnalysisResponder(
+        () => ({ cp: 0 }),
+        (fen) => bestByFen.get(fen) ?? 'e2e4',
+      ),
+    );
+    const engine = new UciEngine(transport, { searchTimeoutMs: 2000, handshakeTimeoutMs: 2000 });
+    await engine.init();
+    const report = await analyzeGame(pgn, engine, { depth: 16 });
+
+    expect(report.version).toBe(ANALYSIS_REPORT_VERSION);
+
+    // White's e4 was the engine's best move.
+    expect(report.moves[0].san).toBe('e4');
+    expect(report.moves[0].bestMoveSan).toBe('e4');
+    expect(report.moves[0].isBest).toBe(true);
+
+    // Black's e5 was NOT the engine's best (Nc6 was) — surfaced as UCI + SAN.
+    expect(report.moves[1].san).toBe('e5');
+    expect(report.moves[1].bestMoveUci).toBe('b8c6');
+    expect(report.moves[1].bestMoveSan).toBe('Nc6');
+    expect(report.moves[1].isBest).toBe(false);
   });
 });
 

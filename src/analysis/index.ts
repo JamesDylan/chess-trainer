@@ -3,6 +3,12 @@
 // AnalysisEngine, and the cache store is storage-agnostic behind its interface.
 
 export * from './types';
-export { analyzeGame, AnalysisCancelled, DEFAULT_ANALYSIS_DEPTH, inferLastMove } from './analyzer';
+export {
+  analyzeGame,
+  AnalysisCancelled,
+  DEFAULT_ANALYSIS_DEPTH,
+  ANALYSIS_REPORT_VERSION,
+  inferLastMove,
+} from './analyzer';
 export type { AnalysisStore } from './analysisStore';
 export { InMemoryAnalysisStore, IndexedDbAnalysisStore } from './analysisStore';

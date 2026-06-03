@@ -36,6 +36,16 @@ import type {
 /** Default fixed search depth per position — deeper than play (REFERENCE §2/§3). */
 export const DEFAULT_ANALYSIS_DEPTH = 16;
 
+/** Report schema version. Bump when MoveAnalysis/GameReport shape changes so the
+ *  UI can discard caches written by an older build. v2 added best-move fields. */
+export const ANALYSIS_REPORT_VERSION = 2;
+
+/** One position's engine result: its score and the engine's best move (UCI). */
+interface PositionEval {
+  score: Score;
+  bestUci: string;
+}
+
 /** Thrown by `analyzeGame` when `opts.shouldCancel()` reports an abort. */
 export class AnalysisCancelled extends Error {
   constructor() {
@@ -89,17 +99,18 @@ export async function analyzeGame(
   await engine.newGame();
   await engine.setStrength({ limitStrength: false, skillLevel: 20, movetimeMs: 1000, multipv });
 
-  // Evaluate by depth, reading the score off lastInfo after each search.
-  const evalByFen = new Map<string, Score>();
+  // Evaluate by depth, reading the score off lastInfo and the best move off the
+  // returned bestmove after each search.
+  const evalByFen = new Map<string, PositionEval>();
   const total = toEval.length;
   opts.onProgress?.(0, total);
   let done = 0;
   for (const fen of toEval) {
     if (opts.shouldCancel?.()) throw new AnalysisCancelled();
-    await engine.bestMove({ fen }, { depth });
+    const { best } = await engine.bestMove({ fen }, { depth });
     // Stockfish always emits at least one scored info line before bestmove; fall
     // back to an even position if a search somehow returned none.
-    evalByFen.set(fen, engine.lastInfo?.score ?? { cp: 0 });
+    evalByFen.set(fen, { score: engine.lastInfo?.score ?? { cp: 0 }, bestUci: best });
     done += 1;
     opts.onProgress?.(done, total);
   }
@@ -109,6 +120,7 @@ export async function analyzeGame(
   );
 
   return {
+    version: ANALYSIS_REPORT_VERSION,
     pgn,
     result,
     moves,
@@ -150,9 +162,10 @@ function replay(pgn: string): { plies: ReplayPly[]; result: GameResult } {
 function buildMoveAnalysis(
   p: ReplayPly,
   index: number,
-  evalByFen: Map<string, Score>,
+  evalByFen: Map<string, PositionEval>,
 ): MoveAnalysis {
-  const scoreBefore = evalByFen.get(p.fenBefore) ?? { cp: 0 };
+  const before = evalByFen.get(p.fenBefore);
+  const scoreBefore = before?.score ?? { cp: 0 };
   const winBefore = scoreToWinPercent(scoreBefore);
 
   let scoreAfter: Score;
@@ -167,10 +180,14 @@ function buildMoveAnalysis(
     scoreAfter = { cp: 0 };
     winAfter = 50;
   } else {
-    scoreAfter = evalByFen.get(p.fenAfter) ?? { cp: 0 };
+    scoreAfter = evalByFen.get(p.fenAfter)?.score ?? { cp: 0 };
     // win% is symmetric: flip the opponent-POV win% to the mover's POV.
     winAfter = 100 - scoreToWinPercent(scoreAfter);
   }
+
+  // The engine's recommended move at the position the mover faced.
+  const bestMoveUci = before?.bestUci;
+  const bestMoveSan = bestMoveUci ? uciToSan(p.fenBefore, bestMoveUci) : undefined;
 
   return {
     ply: index + 1,
@@ -188,7 +205,19 @@ function buildMoveAnalysis(
     accuracy: winPercentToAccuracy(winBefore, winAfter),
     classification: classifyMove(winBefore, winAfter),
     cpLoss: centipawnLoss(scoreBefore, scoreAfter, p.terminalAfter),
+    bestMoveUci,
+    bestMoveSan,
+    isBest: bestMoveSan !== undefined && bestMoveSan === p.san,
   };
+}
+
+/** Convert a UCI move to SAN in the context of `fen` (reuses ChessGame). Returns
+ *  undefined if the move is not legal there (e.g. a scripted/garbage move). */
+function uciToSan(fen: string, uci: string): string | undefined {
+  const g = new ChessGame(fen);
+  if (!g.move(uci)) return undefined;
+  const history = g.history();
+  return history[history.length - 1];
 }
 
 /** Aggregate one player's moves: harmonic-mean accuracy, ACPL, class counts. */

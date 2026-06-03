@@ -10,7 +10,13 @@ import { createWorkerEngine } from '../engine/workerEngine';
 import type { UciEngine } from '../engine/uciEngine';
 import { IndexedDbGameRepository, InMemoryGameRepository } from '../persistence';
 import type { GameRepository, SavedGame } from '../persistence';
-import { analyzeGame, AnalysisCancelled, IndexedDbAnalysisStore, InMemoryAnalysisStore } from '../analysis';
+import {
+  analyzeGame,
+  AnalysisCancelled,
+  ANALYSIS_REPORT_VERSION,
+  IndexedDbAnalysisStore,
+  InMemoryAnalysisStore,
+} from '../analysis';
 import type { AnalysisStore } from '../analysis';
 import { BoardView, type Side } from './boardView';
 import { GameController, type StatusKind } from './gameController';
@@ -48,11 +54,12 @@ app.innerHTML = `
 
     <p id="status" class="status" role="status" aria-live="polite">Loading engine…</p>
 
-    <div class="board-wrap">
-      <div id="board" class="cg-wrap"></div>
+    <div class="play-area">
+      <div class="board-wrap">
+        <div id="board" class="cg-wrap"></div>
+      </div>
+      <div id="analysis-root" class="analysis-root"></div>
     </div>
-
-    <div id="analysis-root" class="analysis-root"></div>
 
     <section class="history" aria-label="Saved games">
       <div class="history-head">
@@ -112,18 +119,26 @@ const analysisStore: AnalysisStore =
   typeof indexedDB !== 'undefined' ? new IndexedDbAnalysisStore() : new InMemoryAnalysisStore();
 
 const analysisRootEl = document.querySelector<HTMLDivElement>('#analysis-root')!;
+const layoutEl = document.querySelector<HTMLElement>('.layout')!;
 let currentAnalysisOrientation: Side = 'white';
 const analysisView = new AnalysisView(analysisRootEl, {
-  onShowPosition: (fen, lastMove) =>
-    controller.reviewPosition(fen, { lastMove, orientation: currentAnalysisOrientation }),
+  onShowPosition: (fen, lastMove, shapes) =>
+    controller.reviewPosition(fen, { lastMove, orientation: currentAnalysisOrientation, shapes }),
   onClose: () => {
-    analysisView.hide();
+    hideAnalysis();
     setStatus('Analysis closed — start a New game or Resume one from the list.', 'info');
   },
   onCancel: () => {
     cancelAnalysis = true;
   },
 });
+
+// Widen the page into the two-column (board | report) layout while analysis is
+// visible; collapse back to the single-column play view when it is hidden.
+function hideAnalysis(): void {
+  analysisView.hide();
+  layoutEl.classList.remove('analyzing');
+}
 
 // A dedicated, full-strength analysis engine (its own Web Worker), booted lazily on
 // first use so it never slows the initial page load or the play engine.
@@ -145,11 +160,13 @@ async function analyzeSavedGame(game: SavedGame): Promise<void> {
   analyzing = true;
   cancelAnalysis = false;
   currentAnalysisOrientation = game.humanColor;
+  layoutEl.classList.add('analyzing'); // two-column layout: board | report
   const meta = { strengthElo: game.strengthElo, humanColor: game.humanColor };
   try {
-    // Instant re-open from cache when the saved game's moves are unchanged.
+    // Instant re-open from cache when the saved game's moves are unchanged AND the
+    // cached report matches the current report schema (else recompute).
     const cached = await analysisStore.get(game.id).catch(() => undefined);
-    if (cached && cached.pgn === game.pgn) {
+    if (cached && cached.pgn === game.pgn && cached.version === ANALYSIS_REPORT_VERSION) {
       analysisView.render(cached, meta);
       return;
     }
@@ -166,7 +183,7 @@ async function analyzeSavedGame(game: SavedGame): Promise<void> {
     analysisView.render(report, meta);
   } catch (err) {
     if (err instanceof AnalysisCancelled) {
-      analysisView.hide();
+      hideAnalysis();
       setStatus('Analysis cancelled.', 'info');
     } else {
       analysisView.showError(`Analysis failed: ${(err as Error).message}`);
@@ -185,13 +202,13 @@ function selectedElo(): number {
 
 strengthEl.addEventListener('change', () => controller.setStrengthElo(selectedElo()));
 newGameEl.addEventListener('click', () => {
-  analysisView.hide();
+  hideAnalysis();
   void controller.newGame(selectedSide(), selectedElo());
 });
 saveGameEl.addEventListener('click', () => void controller.save());
 resignEl.addEventListener('click', () => void controller.resign());
 clearHistoryEl.addEventListener('click', () => {
-  analysisView.hide();
+  hideAnalysis();
   void repo
     .clear()
     .then(() => analysisStore.clear().catch(() => {}))
@@ -231,7 +248,7 @@ function renderHistoryRow(game: SavedGame): HTMLLIElement {
   if (game.inProgress) {
     primaryBtn.textContent = 'Resume';
     primaryBtn.addEventListener('click', () => {
-      analysisView.hide();
+      hideAnalysis();
       sideEl.value = game.humanColor;
       strengthEl.value = String(game.strengthElo);
       void controller.resume(game);
@@ -239,7 +256,7 @@ function renderHistoryRow(game: SavedGame): HTMLLIElement {
   } else {
     primaryBtn.textContent = 'View';
     primaryBtn.addEventListener('click', () => {
-      analysisView.hide();
+      hideAnalysis();
       controller.viewPgn(game.pgn);
     });
   }

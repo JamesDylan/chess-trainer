@@ -17,9 +17,14 @@ function scoreField(score: Score): string {
 
 /**
  * Build a responder that returns `scoreForFen(fen)` for each searched position.
- * `fen` is the exact string the analyzer sent after `position fen `.
+ * `fen` is the exact string the analyzer sent after `position fen `. Optionally
+ * `bestForFen(fen)` supplies the engine's best move (UCI) for that position; it
+ * defaults to `e2e4`, and is echoed both in the `pv` and the `bestmove` line.
  */
-export function scriptedAnalysisResponder(scoreForFen: (fen: string) => Score): Responder {
+export function scriptedAnalysisResponder(
+  scoreForFen: (fen: string) => Score,
+  bestForFen: (fen: string) => string = () => 'e2e4',
+): Responder {
   let pendingFen = '';
   return (command, emit) => {
     if (command === 'uci') {
@@ -34,8 +39,9 @@ export function scriptedAnalysisResponder(scoreForFen: (fen: string) => Score): 
       pendingFen = 'startpos';
     } else if (command.startsWith('go')) {
       const field = scoreField(scoreForFen(pendingFen));
-      emit(`info depth 16 seldepth 22 multipv 1 score ${field} nodes 100000 nps 1000000 time 50 pv e2e4 e7e5`);
-      emit('bestmove e2e4 ponder e7e5');
+      const best = bestForFen(pendingFen);
+      emit(`info depth 16 seldepth 22 multipv 1 score ${field} nodes 100000 nps 1000000 time 50 pv ${best}`);
+      emit(`bestmove ${best}`);
     }
     // setoption / ucinewgame are accepted silently.
   };
