@@ -28,6 +28,11 @@ export class ChessGame {
     }
   }
 
+  /** Take back the last half-move (ply). Returns true if a move was undone. */
+  undo(): boolean {
+    return this.c.undo() !== null;
+  }
+
   legalMoves(): string[] {
     return this.c.moves();
   }

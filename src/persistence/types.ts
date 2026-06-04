@@ -21,6 +21,8 @@ export interface SavedGame {
   humanColor: Color;
   /** True while the game is unfinished (saved mid-play, resumable). Absent/false = finished. */
   inProgress?: boolean;
+  /** True if the player took a move back at any point during this game. */
+  undoUsed?: boolean;
 }
 
 /** A game to persist, before the store assigns an `id`. */

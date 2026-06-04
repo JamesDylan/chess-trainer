@@ -31,3 +31,14 @@ export const ANALYSIS_DEPTH = DEFAULT_ANALYSIS_DEPTH;
 /** Per-position search timeout for the analysis engine. Generous: a deep search
  *  on the single-threaded WASM build can take several seconds in sharp positions. */
 export const ANALYSIS_SEARCH_TIMEOUT_MS = 60_000;
+
+// --- Stage 3: puzzles -------------------------------------------------------
+
+/** The curated puzzle asset, served from public/puzzles (built by scripts/build-puzzles.mjs).
+ *  Fetched same-origin so the trainer stays fully offline, exactly like the engine wasm. */
+export function puzzlesUrl(): URL {
+  return new URL(`${import.meta.env.BASE_URL}puzzles/puzzles.json`, window.location.href);
+}
+
+/** How many puzzles solved counts as hitting the daily target. */
+export const PUZZLE_DAILY_TARGET = 10;

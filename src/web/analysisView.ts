@@ -8,6 +8,7 @@
 import type { GameReport, MoveAnalysis } from '../analysis/types';
 import type { MoveClass, Score } from '../core/types';
 import type { Side, BoardShape } from './boardView';
+import { copyText } from './clipboard';
 
 export interface AnalysisViewCallbacks {
   /** Drive the shared board to a position (last-move highlight + best-move arrows). */
@@ -161,8 +162,39 @@ export class AnalysisView {
     sub.textContent = `vs ~${meta.strengthElo} Elo · you ${meta.humanColor} · depth ${this.report?.depth ?? ''}`;
     const title = document.createElement('div');
     title.append(h2, sub);
-    head.append(title, button('Close', () => this.cb.onClose(), 'secondary'));
+
+    // Export the analysed game so it can be checked on Lichess (engine accuracy):
+    // FEN = the position currently shown; PGN = the whole game.
+    const fenBtn = document.createElement('button');
+    fenBtn.type = 'button';
+    fenBtn.className = 'ghost';
+    fenBtn.textContent = 'FEN';
+    fenBtn.title = 'Copy this position’s FEN';
+    fenBtn.addEventListener('click', () => void this.flashCopy(fenBtn, this.positionFor(this.currentPly).fen));
+
+    const pgnBtn = document.createElement('button');
+    pgnBtn.type = 'button';
+    pgnBtn.className = 'ghost';
+    pgnBtn.textContent = 'PGN';
+    pgnBtn.title = 'Copy the game’s PGN';
+    pgnBtn.addEventListener('click', () => void this.flashCopy(pgnBtn, this.report?.pgn ?? ''));
+
+    const actions = document.createElement('div');
+    actions.className = 'analysis-head-actions';
+    actions.append(fenBtn, pgnBtn, button('Close', () => this.cb.onClose(), 'secondary'));
+    head.append(title, actions);
     return head;
+  }
+
+  /** Copy text and briefly confirm on the button. */
+  private async flashCopy(btn: HTMLButtonElement, text: string): Promise<void> {
+    if (!text) return;
+    const ok = await copyText(text);
+    const prev = btn.textContent;
+    btn.textContent = ok ? 'Copied' : 'Failed';
+    window.setTimeout(() => {
+      btn.textContent = prev;
+    }, 1000);
   }
 
   private buildSummary(report: GameReport): HTMLElement {
@@ -340,11 +372,22 @@ export class AnalysisView {
     return `${m.moveNumber}${dots} ${m.san} · ${meta.label} · ${m.accuracy.toFixed(0)}%`;
   }
 
-  /** A green arrow for the engine's best move, shown when the played move wasn't best. */
+  /**
+   * Whether to surface the engine's alternative for a played move. We never
+   * suggest a "better" move for one that was already best-quality (win% drop < 1,
+   * i.e. ~100% accuracy): even if the engine's nominal #1 differs, the move gave up
+   * nothing, so a suggestion would contradict the 100%/"Best" label. The
+   * alternative (and the arrow) appear only when the move actually lost ground.
+   */
+  private showSuggestion(m: MoveAnalysis): boolean {
+    return !m.isBest && m.bestMoveSan !== undefined && m.classification !== 'best';
+  }
+
+  /** A green arrow for the engine's best move, shown only when there's a real improvement. */
   private shapesFor(ply: number): BoardShape[] {
     if (!this.report || ply === 0) return [];
     const m = this.report.moves[ply - 1];
-    if (!m.isBest && m.bestMoveUci && m.bestMoveUci.length >= 4) {
+    if (this.showSuggestion(m) && m.bestMoveUci && m.bestMoveUci.length >= 4) {
       return [{ orig: m.bestMoveUci.slice(0, 2), dest: m.bestMoveUci.slice(2, 4), brush: 'green' }];
     }
     return [];
@@ -364,14 +407,22 @@ export class AnalysisView {
       el.appendChild(span);
       return;
     }
-    if (m.bestMoveSan) {
+    if (this.showSuggestion(m)) {
       const played = document.createElement('span');
-      played.textContent = `You played ${m.san}. `;
+      played.textContent = `You played ${m.san} (${CLASS_META[m.classification].label}). `;
       const best = document.createElement('span');
       best.className = 'detail-suggest';
       best.textContent = `Best: ${m.bestMoveSan}`;
       el.append(played, best);
+      return;
     }
+
+    // A best-quality move that wasn't the engine's nominal #1: nothing to
+    // improve, so don't contradict the 100%/"Best" label with an alternative.
+    const ok = document.createElement('span');
+    ok.className = 'detail-ok';
+    ok.textContent = `${m.san} — no improvement`;
+    el.appendChild(ok);
   }
 
   private attachKeys(): void {

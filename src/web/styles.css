@@ -74,13 +74,79 @@ button.danger { background: transparent; color: var(--danger); border: 1px solid
 .status[data-kind="gameover"] { color: var(--ok); font-weight: 600; }
 .status[data-kind="error"] { color: var(--danger); font-weight: 600; }
 
-.board-wrap { display: flex; justify-content: center; }
+/* The board and everything stacked with it (captured rows + toolbar). */
+.board-col {
+  width: min(82vw, 480px);
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.board-wrap { display: flex; justify-content: center; width: 100%; }
 
-/* chessground sizes itself to this box. */
+/* chessground sizes itself to this box (explicit square — robust across browsers). */
 .cg-wrap {
   width: min(82vw, 480px);
   height: min(82vw, 480px);
 }
+
+/* Captured pieces above/below the board. */
+.captured {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 1px;
+  min-height: 22px;
+  line-height: 1;
+  padding: 0 2px;
+}
+.cap-piece {
+  font-size: 18px;
+  color: #aeb6c7;
+  margin-right: -3px; /* slight overlap, like chess.com */
+}
+.cap-adv {
+  margin-left: 8px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+/* Board toolbar: nav | actions | export, grouped and allowed to wrap tidily. */
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px 14px;
+  margin-top: 2px;
+}
+.nav-group { display: flex; align-items: center; gap: 4px; }
+.action-group,
+.export-group { display: flex; align-items: center; gap: 6px; }
+button.icon {
+  padding: 6px 10px;
+  font-size: 0.85rem;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid #3a4254;
+}
+button.icon:hover:not(:disabled) { background: #343c4e; filter: none; }
+.nav-indicator {
+  min-width: 3.4em;
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-variant-numeric: tabular-nums;
+}
+button.ghost {
+  padding: 6px 9px;
+  font-size: 0.78rem;
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid #3a4254;
+}
+button.ghost:hover:not(:disabled) { color: var(--text); filter: none; }
 
 .history { margin-top: 28px; }
 .history-head {
@@ -104,6 +170,7 @@ button.danger { background: transparent; color: var(--danger); border: 1px solid
 .history-meta { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .history-result { font-weight: 700; }
 .history-result.inprogress { color: var(--warn); font-weight: 600; }
+.undo-mark { color: var(--accent); font-weight: 700; margin-left: 2px; }
 .history-detail { color: var(--muted); font-size: 0.8rem; }
 .history-actions { display: flex; gap: 6px; flex: none; }
 .history-actions button { padding: 5px 10px; font-size: 0.8rem; }
@@ -238,6 +305,7 @@ button.step { padding: 4px 10px; font-size: 0.95rem; min-width: 38px; }
 }
 .detail-best { color: var(--ok); font-weight: 600; }
 .detail-suggest { color: var(--ok); font-weight: 600; }
+.detail-ok { color: var(--muted); }
 
 /* --- Side-by-side layout: board | report (only while analysing) ----------- */
 /* Default (play / no analysis) stays single-column and centred, unchanged. */
@@ -247,17 +315,159 @@ button.step { padding: 4px 10px; font-size: 0.95rem; min-width: 38px; }
   gap: 18px;
   align-items: flex-start;
 }
-.layout.analyzing .board-wrap {
+.layout.analyzing .board-col {
   flex: 0 0 auto;
+  margin: 0;
   position: sticky; /* board stays in view while the report scrolls */
   top: 12px;
 }
 .layout.analyzing .analysis-root { flex: 1 1 auto; min-width: 0; }
 .layout.analyzing .analysis { margin-top: 0; }
+/* The play toolbar is irrelevant during analysis (the report has its own stepper). */
+.layout.analyzing .toolbar { display: none; }
 
 /* Narrow screens: stack the report under the board (no sticky). */
 @media (max-width: 880px) {
   .layout.analyzing { max-width: 560px; }
   .layout.analyzing .play-area { flex-direction: column; }
-  .layout.analyzing .board-wrap { position: static; }
+  .layout.analyzing .board-col { position: static; margin: 0 auto; }
+}
+
+/* Analysis header: FEN/PGN/Close actions. */
+.analysis-head-actions { display: flex; align-items: center; gap: 6px; flex: none; }
+
+/* --- Stage 3: tabs + puzzles ---------------------------------------------- */
+
+.tabs {
+  display: flex;
+  gap: 6px;
+  margin: 0 0 16px;
+  border-bottom: 1px solid #3a4254;
+}
+button.tab {
+  background: transparent;
+  color: var(--muted);
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  padding: 8px 14px;
+  font-weight: 600;
+}
+button.tab:hover:not(:disabled) { color: var(--text); filter: none; }
+button.tab.active { color: var(--text); border-bottom-color: var(--accent); }
+
+.puzzle-area {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.puzzle-area .board-col { width: min(82vw, 480px); margin: 0 auto; }
+
+.puzzle-panel { width: 100%; }
+.puzzle {
+  background: var(--panel);
+  border-radius: 10px;
+  padding: 14px;
+}
+
+.puzzle-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.puzzle-head h2 { margin: 0; font-size: 1.05rem; }
+.puzzle-sub { display: block; color: var(--muted); font-size: 0.78rem; margin-top: 2px; }
+
+.puzzle-rating { text-align: right; line-height: 1.15; display: flex; flex-direction: column; align-items: flex-end; }
+.puzzle-rating-num { font-size: 1.7rem; font-weight: 700; }
+.puzzle-rating-label { color: var(--muted); font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.03em; }
+.puzzle-delta { font-weight: 700; font-size: 0.95rem; margin-top: 2px; }
+.puzzle-delta.up { color: var(--ok); }
+.puzzle-delta.down { color: var(--danger); }
+
+.puzzle-message { min-height: 1.4em; margin: 6px 0; font-size: 0.95rem; }
+
+.puzzle-meta {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  color: var(--muted);
+  font-size: 0.82rem;
+  min-height: 1.1em;
+  margin-bottom: 10px;
+}
+.puzzle-progress { font-variant-numeric: tabular-nums; }
+.puzzle-themes { font-style: italic; }
+.puzzle-frozen { color: var(--warn); font-style: italic; }
+
+/* Back/forward stepper through the played line. */
+.puzzle-nav {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.puzzle-nav .icon { padding: 4px 10px; font-size: 0.85rem; }
+.puzzle-nav-indicator {
+  min-width: 3.2em;
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.puzzle-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+button.puzzle-next { min-width: 8em; }
+.puzzle-theme-filter {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+.puzzle-theme-filter select {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid #3a4254;
+  border-radius: 6px;
+  padding: 4px 6px;
+  font-size: 0.82rem;
+}
+
+.puzzle-stats-col { display: flex; flex-direction: column; gap: 8px; }
+.puzzle-stats {
+  display: flex;
+  gap: 10px;
+}
+.puzzle-stat {
+  flex: 1;
+  background: #232a38;
+  border-radius: 8px;
+  padding: 8px 6px;
+  text-align: center;
+}
+.puzzle-stat.done { outline: 1px solid var(--ok); }
+.puzzle-stat-value { display: block; font-size: 1.05rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.puzzle-stat-label { display: block; color: var(--muted); font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.03em; margin-top: 2px; }
+
+.puzzle-daily-bar {
+  height: 6px;
+  background: #1b2130;
+  border-radius: 999px;
+  overflow: hidden;
+}
+.puzzle-daily-fill {
+  height: 100%;
+  width: 0;
+  background: var(--ok);
+  transition: width 0.25s ease;
 }
