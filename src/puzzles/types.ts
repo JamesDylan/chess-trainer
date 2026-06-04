@@ -62,4 +62,17 @@ export interface PuzzleAttempt {
   ratingDelta: number;
   /** User RD after the attempt. */
   rdAfter: number;
+  /**
+   * The solved puzzle's theme tags (e.g. ["fork", "endgame"]), copied at attempt
+   * time so per-theme/per-phase coaching (Stage 4) is derivable from the log alone.
+   * OPTIONAL because rows written before Stage 4 don't carry it; the PuzzleStore
+   * normalises a missing value to `[]` on read, so consumers never see undefined.
+   */
+  themes?: string[];
+  /**
+   * True if any hint was used on this attempt (the rating was frozen). Lets coaching
+   * separate genuine solves from assisted ones. OPTIONAL for the same back-compat
+   * reason as `themes`; normalised to `false` on read.
+   */
+  assisted?: boolean;
 }

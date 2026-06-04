@@ -12,3 +12,7 @@ export * from './engine';
 // Stage 3 — puzzle layer (engine-less). Pure solver state machine, adaptive
 // selection, the loader for the static asset, and the storage-agnostic PuzzleStore.
 export * from './puzzles';
+
+// Stage 4 — coach layer (engine-less, DOM-less). Pure stats + rule-based coaching
+// over the puzzle attempt log, saved games, and cached analysis reports.
+export * from './coach';

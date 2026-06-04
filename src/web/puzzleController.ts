@@ -290,6 +290,10 @@ export class PuzzleController {
       ratingAfter: Math.round(after.rating),
       ratingDelta: delta ?? 0,
       rdAfter: Math.round(after.rd),
+      // Stage 4: persist the puzzle's themes + whether a hint was used, so per-theme
+      // and assisted-vs-clean coaching is derivable from the attempt log alone.
+      themes: puzzle.themes,
+      assisted: this.assisted,
     };
     void this.persist(after, attempt);
   }

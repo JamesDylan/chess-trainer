@@ -25,6 +25,8 @@ import { GameController, type StatusKind } from './gameController';
 import { AnalysisView } from './analysisView';
 import { PuzzleController } from './puzzleController';
 import { PuzzleView } from './puzzleView';
+import { ProgressController } from './progressController';
+import { ProgressView } from './progressView';
 import { copyText } from './clipboard';
 import { capturedBy, advantageFor, PIECE_TYPES, type CapturedCount } from './material';
 import {
@@ -47,6 +49,7 @@ app.innerHTML = `
     <nav class="tabs" aria-label="Mode">
       <button id="tab-play" class="tab active" type="button" aria-selected="true">Play</button>
       <button id="tab-puzzles" class="tab" type="button" aria-selected="false">Puzzles</button>
+      <button id="tab-progress" class="tab" type="button" aria-selected="false">Progress</button>
     </nav>
 
     <div id="play-view">
@@ -113,6 +116,10 @@ app.innerHTML = `
         </div>
         <div id="puzzle-panel" class="puzzle-panel"></div>
       </div>
+    </section>
+
+    <section id="progress-view" hidden aria-label="Progress">
+      <div id="progress-panel" class="progress-panel"></div>
     </section>
   </main>
 `;
@@ -195,8 +202,19 @@ controller = new GameController(board, repo, {
 
 // Puzzles: built lazily on first visit to the Puzzles tab (see initPuzzles below).
 // Declared here so the keyboard handler can route the arrow keys to it.
-let puzzlesInited = false;
 let puzzleController: PuzzleController | null = null;
+let puzzlesReady: Promise<void> | null = null;
+
+// Puzzle progress lives in its OWN IndexedDB database (see IndexedDbPuzzleStore).
+// Created at module scope so BOTH the Puzzles tab and the Progress tab read the same
+// store (the analysis cache and games repo are likewise shared, declared below/above).
+const puzzleStore: PuzzleStore =
+  typeof indexedDB !== 'undefined' ? new IndexedDbPuzzleStore() : new InMemoryPuzzleStore();
+
+// Progress (Stage 4): built lazily on first visit; re-derived live on each open.
+let progressController: ProgressController | null = null;
+let progressView: ProgressView | null = null;
+let progressReady: Promise<void> | null = null;
 
 // --- Stage 2: analysis -------------------------------------------------------
 
@@ -314,6 +332,8 @@ document.addEventListener('keydown', (e) => {
   if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
   const tag = (document.activeElement?.tagName ?? '').toUpperCase();
   if (tag === 'SELECT' || tag === 'INPUT' || tag === 'TEXTAREA') return;
+  const prog = document.querySelector<HTMLElement>('#progress-view');
+  if (prog && !prog.hidden) return; // Progress tab has no board to navigate
   const pv = document.querySelector<HTMLElement>('#puzzle-view');
   if (pv && !pv.hidden) {
     // In the Puzzles tab, the arrows step through the puzzle line.
@@ -410,37 +430,72 @@ function renderHistoryRow(game: SavedGame): HTMLLIElement {
 
 const tabPlayEl = document.querySelector<HTMLButtonElement>('#tab-play')!;
 const tabPuzzlesEl = document.querySelector<HTMLButtonElement>('#tab-puzzles')!;
+const tabProgressEl = document.querySelector<HTMLButtonElement>('#tab-progress')!;
 const playViewEl = document.querySelector<HTMLDivElement>('#play-view')!;
 const puzzleViewEl = document.querySelector<HTMLElement>('#puzzle-view')!;
+const progressViewEl = document.querySelector<HTMLElement>('#progress-view')!;
 
-function showTab(tab: 'play' | 'puzzles'): void {
-  const puzzles = tab === 'puzzles';
-  playViewEl.hidden = puzzles;
-  puzzleViewEl.hidden = !puzzles;
-  tabPlayEl.classList.toggle('active', !puzzles);
-  tabPuzzlesEl.classList.toggle('active', puzzles);
-  tabPlayEl.setAttribute('aria-selected', String(!puzzles));
-  tabPuzzlesEl.setAttribute('aria-selected', String(puzzles));
-  if (puzzles) void initPuzzles();
+type Tab = 'play' | 'puzzles' | 'progress';
+
+function showTab(tab: Tab): void {
+  playViewEl.hidden = tab !== 'play';
+  puzzleViewEl.hidden = tab !== 'puzzles';
+  progressViewEl.hidden = tab !== 'progress';
+  tabPlayEl.classList.toggle('active', tab === 'play');
+  tabPuzzlesEl.classList.toggle('active', tab === 'puzzles');
+  tabProgressEl.classList.toggle('active', tab === 'progress');
+  tabPlayEl.setAttribute('aria-selected', String(tab === 'play'));
+  tabPuzzlesEl.setAttribute('aria-selected', String(tab === 'puzzles'));
+  tabProgressEl.setAttribute('aria-selected', String(tab === 'progress'));
+  if (tab === 'puzzles') void initPuzzles();
+  if (tab === 'progress') void openProgress();
+}
+
+// Progress tab: derive live on open. First open builds the controller (which refreshes
+// once); every later open re-refreshes, so new attempts/analyses show immediately.
+async function openProgress(): Promise<void> {
+  const firstOpen = !progressReady;
+  await initProgress();
+  if (!firstOpen) await progressController?.refresh();
+}
+
+function initProgress(): Promise<void> {
+  return (progressReady ??= doInitProgress());
+}
+
+async function doInitProgress(): Promise<void> {
+  const panel = document.querySelector<HTMLDivElement>('#progress-panel')!;
+  progressView = new ProgressView(panel, { onDrill: (theme) => void drillTheme(theme) });
+  progressView.showStatus('Loading your progress…');
+  progressController = new ProgressController(
+    { puzzleStore, gameRepo: repo, analysisStore },
+    { onState: (s) => progressView?.render(s) },
+  );
+  await progressController.refresh();
+}
+
+// "Drill this": jump to the Puzzles tab pre-filtered to the weak theme, closing the
+// play / analyse → train loop. Wait for the puzzle controller to be ready before filtering.
+async function drillTheme(theme: string): Promise<void> {
+  showTab('puzzles');
+  await initPuzzles();
+  puzzleController?.setTheme(theme);
 }
 
 // Built lazily on first visit to the Puzzles tab: a SEPARATE board + controller, so
 // the play view (engine, persistence, analysis) is never touched. Creating the board
 // only once its container is visible lets chessground size itself correctly.
-async function initPuzzles(): Promise<void> {
-  if (puzzlesInited) return;
-  puzzlesInited = true;
+function initPuzzles(): Promise<void> {
+  return (puzzlesReady ??= doInitPuzzles());
+}
 
+async function doInitPuzzles(): Promise<void> {
   const puzzleBoardEl = document.querySelector<HTMLDivElement>('#puzzle-board')!;
   const puzzlePanelEl = document.querySelector<HTMLDivElement>('#puzzle-panel')!;
 
   const puzzleBoard = new BoardView(puzzleBoardEl, 'white', (from, to) => {
     void puzzleController?.handleUserMove(from, to);
   });
-
-  // Puzzle progress lives in its OWN IndexedDB database (see IndexedDbPuzzleStore).
-  const puzzleStore: PuzzleStore =
-    typeof indexedDB !== 'undefined' ? new IndexedDbPuzzleStore() : new InMemoryPuzzleStore();
 
   const puzzleView = new PuzzleView(puzzlePanelEl, {
     onNext: () => puzzleController?.startNext(),
@@ -473,6 +528,7 @@ async function initPuzzles(): Promise<void> {
 
 tabPlayEl.addEventListener('click', () => showTab('play'));
 tabPuzzlesEl.addEventListener('click', () => showTab('puzzles'));
+tabProgressEl.addEventListener('click', () => showTab('progress'));
 
 // Boot the engine, then enable play.
 async function boot(): Promise<void> {

@@ -11,6 +11,15 @@ import type { RatingState } from '../core/rating';
 import type { PuzzleAttempt } from './types';
 
 /**
+ * Back-compat normaliser: rows written before Stage 4 added `themes`/`assisted` lack
+ * those fields. Fill them with `[]`/`false` so every attempt the store returns is
+ * concrete — coaching/stats never see `undefined` and never throw on a legacy row.
+ */
+function normalizeAttempt(a: PuzzleAttempt): PuzzleAttempt {
+  return { ...a, themes: a.themes ?? [], assisted: a.assisted ?? false };
+}
+
+/**
  * CRUD over puzzle progress: the user's current Glicko-2 state (a single row) and an
  * append-only attempt log (newest last). All async so the same interface fits both
  * IndexedDB (browser) and a future native store.
@@ -48,7 +57,7 @@ export class InMemoryPuzzleStore implements PuzzleStore {
   }
 
   listAttempts(): Promise<PuzzleAttempt[]> {
-    return Promise.resolve(this.attempts.map((a) => ({ ...a })));
+    return Promise.resolve(this.attempts.map((a) => normalizeAttempt(a)));
   }
 
   clear(): Promise<void> {
@@ -62,7 +71,11 @@ const DB_NAME = 'chess-trainer-puzzles';
 const STATE_STORE = 'state';
 const ATTEMPTS_STORE = 'attempts';
 const RATING_KEY = 'rating';
-const DB_VERSION = 1;
+// v2 (Stage 4): `PuzzleAttempt` gained `themes`/`assisted`. The object stores are
+// unchanged, so the upgrade only (re)creates missing stores; back-compat for rows
+// written under v1 is handled at READ time by `normalizeAttempt` (legacy rows lack
+// the new fields and read as `[]`/`false`), so no row migration is needed.
+const DB_VERSION = 2;
 
 function promisifyRequest<T>(request: IDBRequest<T>): Promise<T> {
   return new Promise<T>((resolve, reject) => {
@@ -143,7 +156,7 @@ export class IndexedDbPuzzleStore implements PuzzleStore {
     const all = await promisifyRequest<PuzzleAttempt[]>(
       tx.objectStore(ATTEMPTS_STORE).getAll() as IDBRequest<PuzzleAttempt[]>,
     );
-    return all;
+    return all.map(normalizeAttempt);
   }
 
   async clear(): Promise<void> {
