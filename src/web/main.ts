@@ -59,24 +59,6 @@ app.innerHTML = `
     </nav>
 
     <div id="play-view">
-    <section class="controls setup" aria-label="Game setup">
-      <label>Strength
-        <select id="strength"></select>
-      </label>
-      <label>You play
-        <select id="side">
-          <option value="white">White</option>
-          <option value="black">Black</option>
-        </select>
-      </label>
-      <button id="new-game" type="button" disabled>New game</button>
-      <label class="coach-toggle" title="Live in-game coaching: eval bar, move feedback, and the best move when you slip">
-        <input type="checkbox" id="coach-mode" /> Coach
-      </label>
-    </section>
-
-    <p id="status" class="status" role="status" aria-live="polite">Loading engine…</p>
-
     <div class="play-area">
       <div class="board-col">
         <div class="captured" id="captured-top" aria-hidden="true"></div>
@@ -105,26 +87,52 @@ app.innerHTML = `
           </div>
         </div>
       </div>
-      <!-- Coach feedback sits to the RIGHT of the board (two-column, like analysis). -->
-      <div id="coach-panel" class="coach-panel" hidden aria-live="polite"></div>
-      <div id="analysis-root" class="analysis-root"></div>
-    </div>
+      <!-- Right column (top-aligned with the board): setup + status, then coach feedback /
+           analysis report / saved games. Keeping these OFF the top of the board means the
+           board sits in the same place as on the Puzzles tab. -->
+      <div class="play-side">
+        <section class="controls setup" aria-label="Game setup">
+          <label>Strength
+            <select id="strength"></select>
+          </label>
+          <label>You play
+            <select id="side">
+              <option value="white">White</option>
+              <option value="black">Black</option>
+            </select>
+          </label>
+          <button id="new-game" type="button" disabled>New game</button>
+          <label class="coach-toggle" title="Live in-game coaching: eval bar, move feedback, and the best move when you slip">
+            <input type="checkbox" id="coach-mode" /> Coach
+          </label>
+        </section>
 
-    <section class="history" aria-label="Saved games">
-      <div class="history-head">
-        <h2>Saved games (<span id="history-count">0</span>)</h2>
-        <button id="clear-history" type="button">Clear all</button>
+        <p id="status" class="status" role="status" aria-live="polite">Loading engine…</p>
+
+        <div id="coach-panel" class="coach-panel" hidden aria-live="polite"></div>
+        <div id="analysis-root" class="analysis-root"></div>
+
+        <section class="history" aria-label="Saved games">
+          <div class="history-head">
+            <h2>Saved games (<span id="history-count">0</span>)</h2>
+            <button id="clear-history" type="button">Clear all</button>
+          </div>
+          <ul id="history-list" class="history-list"></ul>
+        </section>
       </div>
-      <ul id="history-list" class="history-list"></ul>
-    </section>
+    </div>
     </div>
 
     <section id="puzzle-view" hidden aria-label="Puzzles">
       <div class="puzzle-area">
         <div class="board-col">
+          <!-- Empty spacers matching Play's captured-piece rows, so the board sits at the
+               exact same vertical position on both tabs. -->
+          <div class="captured" aria-hidden="true"></div>
           <div class="board-wrap">
             <div id="puzzle-board" class="cg-wrap"></div>
           </div>
+          <div class="captured" aria-hidden="true"></div>
         </div>
         <div id="puzzle-panel" class="puzzle-panel"></div>
       </div>
@@ -221,6 +229,9 @@ controller = new GameController(board, repo, {
 // Declared here so the keyboard handler can route the arrow keys to it.
 let puzzleController: PuzzleController | null = null;
 let puzzlesReady: Promise<void> | null = null;
+// The puzzle board (its own BoardView) — held for redraw when the Puzzles tab is shown,
+// since chessground must re-measure after the two-column layout resizes the board.
+let puzzlesBoardRef: BoardView | null = null;
 
 // Puzzle progress lives in its OWN IndexedDB database (see IndexedDbPuzzleStore).
 // Created at module scope so BOTH the Puzzles tab and the Progress tab read the same
@@ -263,7 +274,6 @@ function hideAnalysis(): void {
   // Leaving/closing analysis (and the start of every New game / Resume / View) is the
   // universal context switch — drop the coach's cache and neutralise its eval bar.
   coach?.reset();
-  updateCoachLayout(); // restore the coach two-column layout if Coach is on
 }
 
 // A dedicated, full-strength analysis engine (its own Web Worker), booted lazily on
@@ -307,21 +317,13 @@ coach = new CoachController(
   (text) => setStatus(text, 'info'),
 );
 
-// Two-column "coaching" layout (board + eval bar on the left, coach notes on the right,
-// like the analysis view) — on iff Coach is enabled AND we're not analysing. Toggling it
-// resizes the board, so chessground must re-measure or the pieces drift off the squares.
-function updateCoachLayout(): void {
-  const twoCol = !!coach?.isEnabled && !layoutEl.classList.contains('analyzing');
-  layoutEl.classList.toggle('coaching', twoCol);
-  requestAnimationFrame(() => board.redraw());
-}
-
 // Manual toggle (remembered, so the low-Elo auto-on never overrides an explicit choice).
+// The coach feedback is just an item in the play-side column, so toggling it doesn't move
+// the board — no layout class or redraw needed (board size is constant via --board).
 let coachToggledManually = false;
 coachModeEl.addEventListener('change', () => {
   coachToggledManually = true;
   coach?.setEnabled(coachModeEl.checked);
-  updateCoachLayout();
 });
 
 /** Apply Coach mode for a starting/resumed game: honour a manual choice, else auto-on
@@ -332,7 +334,6 @@ function syncCoachForNewGame(elo: number): void {
     coachModeEl.checked = COACH_AUTO_ON_MAX_ELO > 0 && elo <= COACH_AUTO_ON_MAX_ELO;
   }
   coach?.setEnabled(coachModeEl.checked);
-  updateCoachLayout();
 }
 
 let analyzing = false;
@@ -343,8 +344,7 @@ async function analyzeSavedGame(game: SavedGame): Promise<void> {
   analyzing = true;
   cancelAnalysis = false;
   currentAnalysisOrientation = game.humanColor;
-  layoutEl.classList.add('analyzing'); // two-column layout: board | report
-  updateCoachLayout(); // the analysis report owns the right column — drop coaching mode
+  layoutEl.classList.add('analyzing'); // hides the play toolbar + coach UI; report fills the side
   const meta = { strengthElo: game.strengthElo, humanColor: game.humanColor };
   try {
     // Instant re-open from cache when the saved game's moves are unchanged AND the
@@ -529,7 +529,10 @@ function showTab(tab: Tab): void {
   tabPlayEl.setAttribute('aria-selected', String(tab === 'play'));
   tabPuzzlesEl.setAttribute('aria-selected', String(tab === 'puzzles'));
   tabProgressEl.setAttribute('aria-selected', String(tab === 'progress'));
-  if (tab === 'puzzles') void initPuzzles();
+  // All tabs share one layout/board size, so switching never resizes the board. Still
+  // redraw chessground on show — a board hidden via display:none can have stale bounds.
+  if (tab === 'play') requestAnimationFrame(() => board.redraw());
+  if (tab === 'puzzles') void initPuzzles().then(() => requestAnimationFrame(() => puzzlesBoardRef?.redraw()));
   if (tab === 'progress') void openProgress();
 }
 
@@ -578,6 +581,7 @@ async function doInitPuzzles(): Promise<void> {
   const puzzleBoard = new BoardView(puzzleBoardEl, 'white', (from, to) => {
     void puzzleController?.handleUserMove(from, to);
   });
+  puzzlesBoardRef = puzzleBoard; // module ref for redraw-on-show
 
   const puzzleView = new PuzzleView(puzzlePanelEl, {
     onNext: () => puzzleController?.startNext(),

@@ -7,6 +7,8 @@
   --danger: #e06c75;
   --ok: #98c379;
   --warn: #e5c07b;
+  /* One board size used on EVERY tab, so the board never resizes/moves when switching. */
+  --board: min(56vw, 540px);
 }
 
 * { box-sizing: border-box; }
@@ -19,7 +21,8 @@ body {
 }
 
 .layout {
-  max-width: 560px;
+  /* Constant width on every tab — the tabs and board never jump when switching. */
+  max-width: 1040px;
   margin: 0 auto;
   padding: 24px 16px 48px;
 }
@@ -74,20 +77,21 @@ button.danger { background: transparent; color: var(--danger); border: 1px solid
 .status[data-kind="gameover"] { color: var(--ok); font-weight: 600; }
 .status[data-kind="error"] { color: var(--danger); font-weight: 600; }
 
-/* The board and everything stacked with it (captured rows + toolbar). */
+/* The board and everything stacked with it (captured rows + toolbar). Width is the
+ * board's; positioning (left column / centred when stacked) is set by the layout rules. */
 .board-col {
-  width: min(82vw, 480px);
-  margin: 0 auto;
+  margin: 0;
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 .board-wrap { display: flex; justify-content: center; width: 100%; }
 
-/* chessground sizes itself to this box (explicit square — robust across browsers). */
+/* chessground sizes itself to this box (explicit square — robust across browsers). The
+ * size is the shared --board variable, so it's identical on every tab. */
 .cg-wrap {
-  width: min(82vw, 480px);
-  height: min(82vw, 480px);
+  width: var(--board);
+  height: var(--board);
 }
 
 /* Captured pieces above/below the board. */
@@ -307,30 +311,52 @@ button.step { padding: 4px 10px; font-size: 0.95rem; min-width: 38px; }
 .detail-suggest { color: var(--ok); font-weight: 600; }
 .detail-ok { color: var(--muted); }
 
-/* --- Side-by-side layout: board | report (only while analysing) ----------- */
-/* Default (play / no analysis) stays single-column and centred, unchanged. */
-.layout.analyzing { max-width: 1080px; }
-.layout.analyzing .play-area {
+/* --- Unified two-column layout: board (left) | side panel (right) ----------- */
+/* The board sits LEFT in the same place on Play and Puzzles; only the right column (and
+ * what's below) changes per tab. Identical on every tab so switching never jumps. */
+.play-area,
+.puzzle-area {
   display: flex;
   gap: 18px;
   align-items: flex-start;
 }
-.layout.analyzing .board-col {
+.play-area .board-col,
+.puzzle-area .board-col {
   flex: 0 0 auto;
+  width: auto;
   margin: 0;
-  position: sticky; /* board stays in view while the report scrolls */
+  position: sticky; /* board stays in view while the side panel scrolls */
   top: 12px;
 }
-.layout.analyzing .analysis-root { flex: 1 1 auto; min-width: 0; }
-.layout.analyzing .analysis { margin-top: 0; }
-/* The play toolbar is irrelevant during analysis (the report has its own stepper). */
-.layout.analyzing .toolbar { display: none; }
+/* Play's right column is a vertical stack (coach feedback / analysis report / saved games);
+ * Puzzles' is the stats panel. Both take the remaining width. */
+.play-side {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.puzzle-panel { flex: 1 1 auto; min-width: 0; }
+.analysis { margin-top: 0; }
+/* The column gap handles spacing — drop the moved items' own outer margins. */
+.play-side .controls { margin-bottom: 0; }
+.play-side .status { margin: 0; }
+.play-side .history { margin-top: 0; }
 
-/* Narrow screens: stack the report under the board (no sticky). */
+/* During analysis the play toolbar + live-coach UI are irrelevant (the report owns it). */
+.layout.analyzing .toolbar,
+.layout.analyzing #eval-bar,
+.layout.analyzing #coach-panel { display: none; }
+
+/* Narrow screens: stack the side panel UNDER the board, board centred and using more
+ * of the width (it's the single column now). */
 @media (max-width: 880px) {
-  .layout.analyzing { max-width: 560px; }
-  .layout.analyzing .play-area { flex-direction: column; }
-  .layout.analyzing .board-col { position: static; margin: 0 auto; }
+  :root { --board: min(86vw, 520px); }
+  .play-area,
+  .puzzle-area { flex-direction: column; }
+  .play-area .board-col,
+  .puzzle-area .board-col { position: static; margin: 0 auto; }
 }
 
 /* Analysis header: FEN/PGN/Close actions. */
@@ -356,14 +382,7 @@ button.tab {
 button.tab:hover:not(:disabled) { color: var(--text); filter: none; }
 button.tab.active { color: var(--text); border-bottom-color: var(--accent); }
 
-.puzzle-area {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-.puzzle-area .board-col { width: min(82vw, 480px); margin: 0 auto; }
-
-.puzzle-panel { width: 100%; }
+/* The Puzzles tab uses the shared two-column layout above (board | stats panel). */
 .puzzle {
   background: var(--panel);
   border-radius: 10px;
@@ -479,6 +498,9 @@ button.puzzle-next { min-width: 8em; }
   background: var(--panel);
   border-radius: 10px;
   padding: 14px;
+  /* No board on this tab — keep the dashboard/lists at a readable width (left-aligned),
+   *  so they don't stretch across the full wide layout. */
+  max-width: 860px;
 }
 .progress-head { margin-bottom: 12px; }
 .progress-head h2 { margin: 0; font-size: 1.05rem; }
@@ -644,8 +666,8 @@ button.puzzle-next { min-width: 8em; }
   pointer-events: none;
 }
 
-/* Coach feedback line under the board. */
-.coach-panel { width: 100%; margin-top: 8px; }
+/* Coach feedback line — an item in the play-side stack (right of the board). */
+.coach-panel { width: 100%; }
 .coach-panel[hidden] { display: none; }
 .coach-feedback {
   background: #232a38;
@@ -676,43 +698,5 @@ button.puzzle-next { min-width: 8em; }
 .coach-actions button { padding: 6px 12px; font-size: 0.82rem; }
 .coach-idle { color: var(--muted); font-style: italic; }
 
-/* The live-coach UI is irrelevant while the analysis report owns the board. */
-.layout.analyzing #eval-bar,
-.layout.analyzing #coach-panel { display: none; }
-
-/* --- Coach two-column layout: board | coach notes (mirrors .analyzing) ------ */
-/* On while Coach is enabled (and not analysing): a wider page, a BIGGER board on the
- * left, and the coach notes in a sticky right column — easier to read and to play. */
-.layout.coaching { max-width: 1040px; }
-.layout.coaching .play-area {
-  display: flex;
-  gap: 18px;
-  align-items: flex-start;
-}
-.layout.coaching .board-col {
-  flex: 0 0 auto;
-  width: auto;            /* size to board + eval bar so the board never compresses */
-  margin: 0;
-  position: sticky;
-  top: 12px;
-}
-.layout.coaching .cg-wrap {
-  width: min(56vw, 540px);
-  height: min(56vw, 540px);
-}
-.layout.coaching #coach-panel {
-  flex: 1 1 auto;
-  min-width: 0;
-  margin-top: 0;
-  position: sticky;
-  top: 12px;
-}
-
-/* Narrow screens: stack the coach notes under the board (no sticky), board back to base. */
-@media (max-width: 880px) {
-  .layout.coaching { max-width: 560px; }
-  .layout.coaching .play-area { flex-direction: column; }
-  .layout.coaching .board-col { position: static; margin: 0 auto; }
-  .layout.coaching .cg-wrap { width: min(82vw, 480px); height: min(82vw, 480px); }
-  .layout.coaching #coach-panel { position: static; width: 100%; }
-}
+/* Coach mode uses the shared two-column layout above — the coach feedback is just one
+ * item in the play-side stack, so toggling it never moves the board. */
