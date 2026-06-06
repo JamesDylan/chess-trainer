@@ -12,7 +12,13 @@
 import type { PuzzleStore } from '../puzzles';
 import type { GameRepository } from '../persistence';
 import { ANALYSIS_REPORT_VERSION, type AnalysisStore } from '../analysis';
-import { buildProgressSnapshot, type AnalyzedGame, type GameOpeningRecord, type ProgressSnapshot } from '../coach';
+import {
+  buildProgressSnapshot,
+  type AnalyzedGame,
+  type GameOpeningRecord,
+  type GameRatingRecord,
+  type ProgressSnapshot,
+} from '../coach';
 import { OpeningBook, SEED_OPENINGS, loadOpeningsFromJson } from '../openings';
 import { openingsUrl } from './config';
 
@@ -62,6 +68,7 @@ export class ProgressController {
       accuracyByGame.set(a.game.id, pr.accuracy);
     }
     const gameOpenings: GameOpeningRecord[] = [];
+    const finishedGames: GameRatingRecord[] = [];
     for (const game of games) {
       if (game.inProgress || game.result === '*') continue; // finished games only
       const detected = book.detectFromPgn(game.pgn);
@@ -71,6 +78,15 @@ export class ProgressController {
         humanColor: game.humanColor,
         accuracy: accuracyByGame.get(game.id),
       });
+      // The classic-Elo playing rating folds over every finished game vs its engine
+      // strength; `undoUsed` discounts a win's gain (a takeback isn't true skill).
+      finishedGames.push({
+        playedAt: game.playedAt,
+        result: game.result,
+        humanColor: game.humanColor,
+        strengthElo: game.strengthElo,
+        undoUsed: game.undoUsed ?? false,
+      });
     }
 
     const snapshot = buildProgressSnapshot({
@@ -79,6 +95,7 @@ export class ProgressController {
       analyzedGames,
       totalGames: games.length,
       gameOpenings,
+      finishedGames,
     });
     this.cb.onState(snapshot);
   }

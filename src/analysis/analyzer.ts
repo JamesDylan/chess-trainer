@@ -17,8 +17,9 @@ import { ChessGame } from '../core/chessGame';
 import type { Color, GameResult, Score } from '../core/types';
 import {
   scoreToWinPercent,
-  winPercentToAccuracy,
-  classifyMove,
+  accuracyFromWinDrop,
+  classFromWinDrop,
+  effectiveWinDrop,
   averageCentipawnLoss,
   harmonicMean,
   CP_CEILING,
@@ -36,9 +37,11 @@ import type {
 /** Default fixed search depth per position — deeper than play (REFERENCE §2/§3). */
 export const DEFAULT_ANALYSIS_DEPTH = 16;
 
-/** Report schema version. Bump when MoveAnalysis/GameReport shape changes so the
- *  UI can discard caches written by an older build. v2 added best-move fields. */
-export const ANALYSIS_REPORT_VERSION = 2;
+/** Report schema version. Bump when MoveAnalysis/GameReport shape changes — or when the
+ *  scoring changes — so the UI discards caches written by an older build. v2 added
+ *  best-move fields; v3 switched accuracy/classification to the cp-weighted "closeness to
+ *  best" (imprecision in won positions now counts). */
+export const ANALYSIS_REPORT_VERSION = 3;
 
 /** One position's engine result: its score and the engine's best move (UCI). */
 interface PositionEval {
@@ -77,6 +80,7 @@ export async function analyzeGame(
 ): Promise<GameReport> {
   const depth = opts.depth ?? DEFAULT_ANALYSIS_DEPTH;
   const multipv = opts.multipv ?? 1;
+  const cpLossWeight = opts.cpLossWeight ?? 0;
 
   const { plies, result } = replay(pgn);
 
@@ -116,7 +120,7 @@ export async function analyzeGame(
   }
 
   const moves: MoveAnalysis[] = plies.map((p, i) =>
-    buildMoveAnalysis(p, i, evalByFen),
+    buildMoveAnalysis(p, i, evalByFen, cpLossWeight),
   );
 
   return {
@@ -163,6 +167,7 @@ function buildMoveAnalysis(
   p: ReplayPly,
   index: number,
   evalByFen: Map<string, PositionEval>,
+  cpLossWeight: number,
 ): MoveAnalysis {
   const before = evalByFen.get(p.fenBefore);
   const scoreBefore = before?.score ?? { cp: 0 };
@@ -189,6 +194,11 @@ function buildMoveAnalysis(
   const bestMoveUci = before?.bestUci;
   const bestMoveSan = bestMoveUci ? uciToSan(p.fenBefore, bestMoveUci) : undefined;
 
+  const cpLoss = centipawnLoss(scoreBefore, scoreAfter, p.terminalAfter);
+  // "Closeness to best": blend the win% drop with a cp-loss term so imprecision in a
+  // won position still counts. cpLossWeight = 0 reproduces the pure win% scoring exactly.
+  const effDrop = effectiveWinDrop(winBefore, winAfter, cpLoss, cpLossWeight);
+
   return {
     ply: index + 1,
     moveNumber: Math.floor(index / 2) + 1,
@@ -202,9 +212,9 @@ function buildMoveAnalysis(
     terminal: p.terminalAfter,
     winBefore,
     winAfter,
-    accuracy: winPercentToAccuracy(winBefore, winAfter),
-    classification: classifyMove(winBefore, winAfter),
-    cpLoss: centipawnLoss(scoreBefore, scoreAfter, p.terminalAfter),
+    accuracy: accuracyFromWinDrop(effDrop),
+    classification: classFromWinDrop(effDrop),
+    cpLoss,
     bestMoveUci,
     bestMoveSan,
     isBest: bestMoveSan !== undefined && bestMoveSan === p.san,

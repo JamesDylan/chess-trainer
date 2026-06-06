@@ -41,6 +41,7 @@ import {
   COACH_LIVE_DEPTH,
   COACH_SEARCH_TIMEOUT_MS,
   COACH_AUTO_ON_MAX_ELO,
+  ACCURACY_CP_WEIGHT,
 } from './config';
 
 const app = document.querySelector<HTMLDivElement>('#app');
@@ -302,7 +303,7 @@ coach = new CoachController(
   controller,
   coachView,
   getCoachEngine,
-  { liveDepth: COACH_LIVE_DEPTH },
+  { liveDepth: COACH_LIVE_DEPTH, cpLossWeight: ACCURACY_CP_WEIGHT },
   (text) => setStatus(text, 'info'),
 );
 
@@ -357,6 +358,7 @@ async function analyzeSavedGame(game: SavedGame): Promise<void> {
     const engine = await getAnalysisEngine();
     const report = await analyzeGame(game.pgn, engine, {
       depth: ANALYSIS_DEPTH,
+      cpLossWeight: ACCURACY_CP_WEIGHT, // count imprecision even in won positions
       onProgress: (done, total) => analysisView.showProgress(done, total),
       shouldCancel: () => cancelAnalysis,
     });

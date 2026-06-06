@@ -37,6 +37,15 @@ export const CLASSIFICATION_THRESHOLDS = {
   mistake: 15,
 } as const;
 
+/**
+ * Default weight applied to centipawn loss when measuring "closeness to best" (see
+ * `effectiveWinDrop`). 0 = pure win%-based scoring (Lichess: imprecision in an already
+ * won/lost position is forgiven because win% barely moves). The app sets this > 0 (see
+ * web/config `ACCURACY_CP_WEIGHT`) so a sloppy move in a winning position still counts
+ * as an inaccuracy/mistake — "how close were my moves to the best move", not just "did I
+ * keep my winning chances". Co-located here as the tunable home, like the thresholds. */
+export const CP_LOSS_ACCURACY_WEIGHT = 0;
+
 /** Convert a centipawn eval (side-to-move POV) to win% in [0, 100]. Clamp cp to +/- CP_CEILING. */
 export function cpToWinPercent(cp: number): number {
   const clampedCp = Math.max(-CP_CEILING, Math.min(CP_CEILING, cp));
@@ -59,31 +68,60 @@ export function scoreToWinPercent(score: Score): number {
 }
 
 /**
- * Per-move accuracy% in [0, 100] from the mover's win% before and after their move.
- * If winAfter >= winBefore, accuracy is 100. Otherwise:
- *   d = winBefore - winAfter
- *   raw = ACC_A * exp(ACC_B * d) - ACC_C
- *   return clamp(raw, 0, 100)
+ * Per-move accuracy% in [0,100] from a "drop" `d` (0..100, mover POV). d <= 0 -> 100.
+ *   raw = ACC_A * exp(ACC_B * d) - ACC_C ; return clamp(raw, 0, 100)
+ * This is the Lichess accuracy curve, factored out so it can be fed either a pure win%
+ * drop (winPercentToAccuracy) or a cp-weighted "effective" drop (effectiveWinDrop).
  */
-export function winPercentToAccuracy(winBefore: number, winAfter: number): number {
-  if (winAfter >= winBefore) {
-    return 100;
-  } else {
-    const d = winBefore - winAfter;
-    const raw = ACC_A * Math.exp(ACC_B * d) - ACC_C;
-    return Math.max(0, Math.min(100, raw));
-  }
+export function accuracyFromWinDrop(d: number): number {
+  if (d <= 0) return 100;
+  const raw = ACC_A * Math.exp(ACC_B * d) - ACC_C;
+  return Math.max(0, Math.min(100, raw));
 }
 
-/** Classify a move by its win% drop (mover POV) using CLASSIFICATION_THRESHOLDS. */
-export function classifyMove(winBefore: number, winAfter: number): MoveClass {
-  const d = winBefore - winAfter;
+/** Classify a "drop" `d` (mover POV, 0..100) using CLASSIFICATION_THRESHOLDS. */
+export function classFromWinDrop(d: number): MoveClass {
   if (d < CLASSIFICATION_THRESHOLDS.best) return 'best';
   if (d < CLASSIFICATION_THRESHOLDS.excellent) return 'excellent';
   if (d < CLASSIFICATION_THRESHOLDS.good) return 'good';
   if (d < CLASSIFICATION_THRESHOLDS.inaccuracy) return 'inaccuracy';
   if (d < CLASSIFICATION_THRESHOLDS.mistake) return 'mistake';
   return 'blunder';
+}
+
+/**
+ * Per-move accuracy% in [0, 100] from the mover's win% before and after their move.
+ * If winAfter >= winBefore, accuracy is 100. (Thin wrapper over accuracyFromWinDrop.)
+ */
+export function winPercentToAccuracy(winBefore: number, winAfter: number): number {
+  return accuracyFromWinDrop(winBefore - winAfter);
+}
+
+/** Classify a move by its win% drop (mover POV) using CLASSIFICATION_THRESHOLDS. */
+export function classifyMove(winBefore: number, winAfter: number): MoveClass {
+  return classFromWinDrop(winBefore - winAfter);
+}
+
+/**
+ * "Closeness to best" effective drop, blending the win% drop with a centipawn-loss term:
+ *   max( winBefore - winAfter,  min(cpWeight * cpLoss, mistakeCap) )
+ * The win% term carries real swings (letting the opponent back in). The cp term adds a
+ * penalty for imprecision even when win% barely moves (a sloppy move in a won position),
+ * which is the "how close to best" signal. The cp term is CAPPED just below the blunder
+ * threshold so cp loss alone can reach 'mistake' but can NEVER manufacture a 'blunder' in
+ * a still-winning position — a "blunder" still requires a genuine win% collapse. With
+ * cpWeight = 0 this is exactly the pure win% drop (Lichess), so callers are back-compat.
+ */
+export function effectiveWinDrop(
+  winBefore: number,
+  winAfter: number,
+  cpLoss: number,
+  cpWeight: number = CP_LOSS_ACCURACY_WEIGHT,
+): number {
+  const winDrop = Math.max(0, winBefore - winAfter);
+  const cpCap = CLASSIFICATION_THRESHOLDS.mistake - 1e-6; // cp alone can't reach 'blunder'
+  const cpTerm = Math.min(cpWeight * Math.max(0, cpLoss), cpCap);
+  return Math.max(winDrop, cpTerm);
 }
 
 /** Average centipawn loss. `losses` are per-move cp losses (>= 0). Empty -> 0. */

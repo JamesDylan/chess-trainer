@@ -29,6 +29,8 @@ export interface CoachConfig {
   liveDepth: number;
   /** Accuracy% below which the best move is surfaced / a move "slipped". */
   bestMoveAccuracy?: number;
+  /** "Closeness to best" cp-loss weight (see evalMath.effectiveWinDrop). 0 = pure win%. */
+  cpLossWeight?: number;
 }
 
 const PIECE_NAMES: Record<string, string> = {
@@ -173,6 +175,7 @@ export class CoachController {
       // rigorous numbers live in the on-demand Analyze pass (Stage 2).
       const fb = liveMoveFeedback(before.score, after.score, before.bestMoveUci, after.pv, mover, {
         bestMoveAccuracy: this.cfg.bestMoveAccuracy,
+        cpLossWeight: this.cfg.cpLossWeight,
       });
       this.presentFeedback(fenBefore, fenAfter, before, fb);
     } catch (err) {

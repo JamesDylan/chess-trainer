@@ -116,6 +116,12 @@ export interface AnalyzeOptions {
   /** MultiPV for the engine (1 is enough for a single-line eval). Default 1. */
   multipv?: number;
   /**
+   * Centipawn-loss weight for "closeness to best" accuracy/classification (see
+   * evalMath.effectiveWinDrop). Default 0 = pure Lichess win%-based scoring; the app
+   * passes a small value so imprecision in won positions still counts.
+   */
+  cpLossWeight?: number;
+  /**
    * Progress callback: `done` non-terminal positions evaluated out of `total`.
    * Called once before the first search (0/total) and after each evaluation.
    */

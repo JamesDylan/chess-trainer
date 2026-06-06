@@ -169,6 +169,40 @@ live bar/arrow behaviour is a manual check by design).
   surgical (it would touch `persistence` + the Stage 4 aggregation). The live coach already
   reuses the analyzer's numbers, so wiring this later is a small additive step.
 
+## Follow-up: stricter accuracy + a playing rating
+
+Two changes after comparing the analysis to chess.com (same game, matching eval line):
+
+**1. "Closeness to best" accuracy (cp-weighted).** Lichess (our original) only penalises
+moves that change *winning chances*, so imprecision in an already-won position is forgiven
+and accuracy reads higher than chess.com (which grades every deviation from best). New
+`evalMath.effectiveWinDrop(winBefore, winAfter, cpLoss, cpWeight) = max(winDrop,
+min(cpWeight·cpLoss, blunderThreshold−ε))` blends the win% drop with a centipawn-loss term,
+so a sloppy move in a winning position now counts as an inaccuracy/mistake. The cp term is
+**capped below the blunder threshold**, so cp loss alone can never manufacture a "??" in a
+still-winning position — the red refutation arrow stays reserved for genuine win% collapses,
+and the live coach's missed-opportunity/undo prompt is still keyed on a real give-back.
+`winPercentToAccuracy`/`classifyMove` now delegate to extracted drop-based helpers
+(`accuracyFromWinDrop`/`classFromWinDrop`) so existing behaviour is unchanged at
+`cpWeight = 0`. The analyzer (`AnalyzeOptions.cpLossWeight`) and the live coach both use
+`ACCURACY_CP_WEIGHT = 0.03` (web/config; tunable: 0 = Lichess-lenient, ~0.05 ≈ chess.com).
+`ANALYSIS_REPORT_VERSION` bumped to 3 so cached reports recompute.
+
+**2. Playing rating (classic Elo vs the engine).** A new pure `src/coach/gameRating.ts`
+folds the standard Elo update over finished games — `NewElo = cur + K·(S − E)`,
+`E = 1/(1+10^((opp−cur)/400))`, opponent = the engine's strength, `S` from result + side,
+seed **800**, `K = 32`, provisional < 10 games. **Undo handling:** a WIN in a game where
+you took a move back keeps only **25%** of its rating gain (`GAME_RATING_UNDO_WIN_RETENTION`,
+read off the existing `SavedGame.undoUsed` flag) — a takeback isn't your true skill; losses
+and draws are unaffected. It's derived live from the saved games (no
+new persistence), surfaced on the Progress tab as a **"playing rating"** card beside the
+**"puzzle rating"**, with a chart and a one-line note explaining why they differ: puzzle
+rating measures tactics (you're told a tactic exists) and reads higher than real playing
+strength; and the engine's Elo is CCRL-anchored, not human (REFERENCE §3) — both explain a
+1400 puzzle rating alongside losing to an "800" bot. New deterministic tests:
+`test/accuracyStrictness.test.ts` (6) and `test/gameRating.test.ts` (9); existing suites
+unchanged. `npm test` ≈ **193**.
+
 ## Acceptance checklist (the human step)
 
 - [ ] Toggle **Coach** on; the **eval bar** appears left of the board and tracks every move.

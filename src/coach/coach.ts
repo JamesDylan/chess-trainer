@@ -7,6 +7,7 @@ import { initialRating, isEstablished } from '../core/rating';
 import { computePuzzleStats } from './puzzleStats';
 import { computeGameStats } from './gameStats';
 import { computeOpeningStats } from './openingStats';
+import { computeGameRating } from './gameRating';
 import { COACH_THRESHOLDS } from './thresholds';
 import type {
   CoachingInsight,
@@ -168,6 +169,7 @@ export function buildProgressSnapshot(input: SnapshotInput): ProgressSnapshot {
   const weaknesses = diagnoseWeaknesses(puzzles, games, openings);
   const insights = buildInsights(weaknesses, puzzles, games);
   const rating = input.rating ?? initialRating();
+  const gameRating = computeGameRating(input.finishedGames ?? []);
 
   return {
     hasData: puzzles.totalAttempts > 0 || games.analyzedGames > 0 || input.totalGames > 0,
@@ -176,6 +178,7 @@ export function buildProgressSnapshot(input: SnapshotInput): ProgressSnapshot {
       rd: Math.round(rating.rd),
       provisional: !isEstablished(rating),
     },
+    gameRating,
     puzzlesSolved: puzzles.solved,
     gamesPlayed: input.totalGames,
     currentStreak: puzzles.currentStreak,

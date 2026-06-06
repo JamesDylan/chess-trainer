@@ -157,6 +157,33 @@ export interface OpeningStat {
   accuracy?: number;
 }
 
+/** One finished game reduced to what the classic-Elo playing rating needs. */
+export interface GameRatingRecord {
+  /** When the game finished (epoch ms) — games are folded oldest-first. */
+  playedAt: number;
+  /** Final result of the game. */
+  result: GameResult;
+  /** Which side the user played. */
+  humanColor: Color;
+  /** The engine strength faced (the opponent rating in the Elo update). */
+  strengthElo: number;
+  /** True if the user took a move back during the game — a win's rating gain is then
+   *  discounted (a takeback isn't true skill). Optional; absent = a clean game. */
+  undoUsed?: boolean;
+}
+
+/** The playing-rating summary (classic Elo from the user's results vs the engine). */
+export interface GameRating {
+  /** Current rating, rounded. */
+  value: number;
+  /** Number of finished (rated) games folded in. */
+  games: number;
+  /** True while still settling from the seed (few games). */
+  provisional: boolean;
+  /** Rating after each rated game, oldest first (for a trend chart). */
+  series: { at: number; rating: number }[];
+}
+
 /** A diagnosed weakness. Ranked by `severity` × confidence weight. */
 export interface Weakness {
   /** Stable id, e.g. "theme:fork", "phase:endgame", "blunders", "opening:Sicilian Defense". */
@@ -191,7 +218,10 @@ export interface CoachingInsight {
 export interface ProgressSnapshot {
   /** True once there's ANY data (an attempt, an analysed game, or a saved game). */
   hasData: boolean;
+  /** Puzzle rating (Glicko-2 vs known-rated puzzles). */
   rating: { value: number; rd: number; provisional: boolean };
+  /** Playing rating (classic Elo from game results vs the engine). */
+  gameRating: GameRating;
   puzzlesSolved: number;
   gamesPlayed: number;
   currentStreak: number;
@@ -226,4 +256,7 @@ export interface SnapshotInput {
   /** Finished games reduced to opening + result + color (detected outside the coach).
    *  Optional so existing callers/tests need not supply it. */
   gameOpenings?: GameOpeningRecord[];
+  /** Finished games reduced to result + color + engine strength, for the classic-Elo
+   *  playing rating. Optional so existing callers/tests need not supply it. */
+  finishedGames?: GameRatingRecord[];
 }

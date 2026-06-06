@@ -23,7 +23,12 @@
 //   - cpLoss is mover POV and reuses the analyzer's bounded-cp helper VERBATIM.
 
 import type { Color, MoveClass, Score } from '../core/types';
-import { scoreToWinPercent, winPercentToAccuracy, classifyMove } from '../core/evalMath';
+import {
+  scoreToWinPercent,
+  accuracyFromWinDrop,
+  classFromWinDrop,
+  effectiveWinDrop,
+} from '../core/evalMath';
 import { centipawnLoss } from '../analysis/analyzer';
 
 /**
@@ -83,6 +88,8 @@ export interface LiveFeedbackOptions {
   bestMoveAccuracy?: number;
   /** Pre-move mover-POV cp at/above which the position is a decisive (winning) advantage. */
   winningCp?: number;
+  /** "Closeness to best" cp-loss weight (see evalMath.effectiveWinDrop). 0 = pure win%. */
+  cpLossWeight?: number;
 }
 
 /**
@@ -106,23 +113,31 @@ export function liveMoveFeedback(
   void mover; // POV is encoded by the score conventions above; param kept for clarity.
   const bestMoveAccuracy = opts.bestMoveAccuracy ?? COACH_BESTMOVE_ACCURACY;
   const winningCp = opts.winningCp ?? COACH_WINNING_CP;
+  const cpWeight = opts.cpLossWeight ?? 0;
 
   const winBefore = scoreToWinPercent(scoreBefore);
   const winAfter = 100 - scoreToWinPercent(scoreAfter);
-  const accuracy = winPercentToAccuracy(winBefore, winAfter);
-  const classification = classifyMove(winBefore, winAfter);
   // Reuse the analyzer's bounded mover-POV cp loss VERBATIM (non-terminal here).
   const cpLoss = centipawnLoss(scoreBefore, scoreAfter, undefined);
 
+  // "Closeness to best": the cp-weighted effective drop drives the displayed accuracy +
+  // classification, so imprecision in a won position still counts. cpWeight = 0 reproduces
+  // the pure win%-based scoring exactly (back-compat).
+  const effDrop = effectiveWinDrop(winBefore, winAfter, cpLoss, cpWeight);
+  const accuracy = accuracyFromWinDrop(effDrop);
+  const classification = classFromWinDrop(effDrop);
+
   const refutationLine = pv ?? [];
+  // effectiveWinDrop caps the cp term below the blunder threshold, so a 'blunder' here
+  // always reflects a real win% collapse — the red refutation arrow is never spurious.
   const refutationUci =
     classification === 'blunder' && refutationLine.length > 0 ? refutationLine[0] : undefined;
 
-  // A move "slipped" when it gave back enough to drop below the best-move accuracy
-  // bar. If the pre-move position was already winning/mating, that slip is a missed
-  // opportunity — flagged regardless of whether the move reached "blunder".
+  // Missed opportunity: a GENUINE give-back of a winning/mating position — gated on the
+  // real win% drop, not mere sub-best precision, so the undo offer stays meaningful (we
+  // don't nag "you missed a win" for a still-completely-winning imprecise move).
   let missedOpportunity: MissedOpportunity | undefined;
-  if (accuracy < bestMoveAccuracy) {
+  if (accuracyFromWinDrop(winBefore - winAfter) < bestMoveAccuracy) {
     if (scoreBefore.mate !== undefined && scoreBefore.mate > 0) {
       missedOpportunity = 'mate';
     } else if (scoreBefore.cp !== undefined && scoreBefore.cp >= winningCp) {

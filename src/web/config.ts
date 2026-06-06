@@ -55,6 +55,15 @@ export const COACH_LIVE_DEPTH = 12;
  *  single-threaded WASM build can take a couple of seconds in sharp positions. */
 export const COACH_SEARCH_TIMEOUT_MS = 60_000;
 
+/**
+ * "Closeness to best" strictness: how much centipawn loss counts toward accuracy/
+ * classification even when win% barely moves (imprecision in a won position). 0 = pure
+ * Lichess win%-based (most lenient); ~0.05 ≈ chess.com-harsh (cp loss maps straight onto
+ * the classification thresholds). 0.03 is the middle ground used by both the post-game
+ * analysis and the live coach, so a sloppy move in a winning position still reads as an
+ * inaccuracy. See evalMath.effectiveWinDrop. Tunable. */
+export const ACCURACY_CP_WEIGHT = 0.03;
+
 /** Auto-enable Coach mode at or below this strength (beginners benefit most; it is
  *  still a visible toggle they can switch off). Set to 0 to never auto-enable. */
 export const COACH_AUTO_ON_MAX_ELO = 1000;

@@ -50,12 +50,37 @@ export class ProgressView {
     this.root.replaceChildren(
       this.headEl(),
       this.dashboardEl(snapshot),
-      this.chartEl(snapshot.puzzles.ratingSeries),
+      this.ratingNoteEl(),
+      this.chartEl(
+        snapshot.puzzles.ratingSeries,
+        'Puzzle rating over time',
+        'Solve puzzles to start your rating curve.',
+        'One attempt so far — solve a few more to see the trend.',
+      ),
+      ...(snapshot.gameRating.series.length >= 2
+        ? [
+            this.chartEl(
+              snapshot.gameRating.series,
+              'Playing rating over time (vs engine)',
+              '',
+              'Play a few games to see your playing-rating trend.',
+            ),
+          ]
+        : []),
       ...(snapshot.insights.length > 0 ? [this.insightsEl(snapshot.insights)] : []),
       this.themesEl(snapshot.puzzles.themes),
       this.phasesEl(snapshot.games),
       this.openingsEl(snapshot.openings),
     );
+  }
+
+  /** A one-line explainer for why the two ratings differ (puzzles overstate strength). */
+  private ratingNoteEl(): HTMLElement {
+    const p = document.createElement('p');
+    p.className = 'progress-note';
+    p.textContent =
+      'Puzzle rating measures tactics (you’re told a tactic is there), so it usually reads higher than your playing rating, which comes from your actual game results vs the engine. Games where you took a move back keep only a quarter of a win.';
+    return p;
   }
 
   // --- builders --------------------------------------------------------------
@@ -86,14 +111,25 @@ export class ProgressView {
     const wrap = document.createElement('div');
     wrap.className = 'progress-dash';
 
-    const rating = statCard(
+    const puzzleRating = statCard(
       String(s.rating.value),
-      s.rating.provisional ? 'rating (provisional)' : 'rating',
+      s.rating.provisional ? 'puzzle rating (prov.)' : 'puzzle rating',
     );
-    rating.title = `RD ${s.rating.rd}${s.rating.provisional ? ' — still settling (RD > 75)' : ' — established'}`;
+    puzzleRating.title = `Tactics rating (Glicko-2) · RD ${s.rating.rd}${s.rating.provisional ? ' — still settling' : ' — established'}`;
+
+    const gr = s.gameRating;
+    const playing = statCard(
+      gr.games > 0 ? String(gr.value) : '—',
+      gr.provisional ? 'playing rating (prov.)' : 'playing rating',
+    );
+    playing.title =
+      gr.games > 0
+        ? `Classic Elo from ${gr.games} finished game(s) vs the engine`
+        : 'Finish some games to estimate your playing rating';
 
     wrap.append(
-      rating,
+      puzzleRating,
+      playing,
       statCard(String(s.puzzlesSolved), 'puzzles solved'),
       statCard(`${s.currentStreak}`, `streak · best ${s.bestStreak}`),
       statCard(String(s.gamesPlayed), s.games.analyzedGames > 0 ? `games · ${s.games.analyzedGames} analysed` : 'games played'),
@@ -105,23 +141,26 @@ export class ProgressView {
     return wrap;
   }
 
-  /** Hand-drawn SVG rating curve (no chart library) — mirrors the analysis sparkline. */
-  private chartEl(series: RatingPoint[]): HTMLElement {
+  /** Hand-drawn SVG rating curve (no chart library) — mirrors the analysis sparkline.
+   *  Reused for both the puzzle-rating and playing-rating series (only `.rating` is read). */
+  private chartEl(
+    series: readonly { rating: number }[],
+    captionText: string,
+    emptyNone: string,
+    emptyOne: string,
+  ): HTMLElement {
     const wrap = document.createElement('div');
     wrap.className = 'progress-chart';
 
     const caption = document.createElement('div');
     caption.className = 'progress-chart-caption';
-    caption.textContent = 'Puzzle rating over time';
+    caption.textContent = captionText;
     wrap.appendChild(caption);
 
     if (series.length < 2) {
       const note = document.createElement('p');
       note.className = 'progress-note';
-      note.textContent =
-        series.length === 0
-          ? 'Solve puzzles to start your rating curve.'
-          : 'One attempt so far — solve a few more to see the trend.';
+      note.textContent = series.length === 0 ? emptyNone : emptyOne;
       wrap.appendChild(note);
       return wrap;
     }

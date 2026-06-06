@@ -15,3 +15,4 @@ export * from './coach';
 // AnalysisEngine slice). The Coach UI on the Play tab consumes these.
 export * from './liveFeedback';
 export * from './evaluatePosition';
+export * from './gameRating';
