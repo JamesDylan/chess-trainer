@@ -88,6 +88,13 @@ export class BoardView {
     this.api.set({ orientation });
   }
 
+  /** Force chessground to re-measure its bounds + re-place pieces. Call after the
+   *  board's box size changes (e.g. toggling the Coach two-column layout), since
+   *  chessground caches bounds and would otherwise leave pieces offset from squares. */
+  redraw(): void {
+    this.api.redrawAll();
+  }
+
   destroy(): void {
     this.api.destroy();
   }

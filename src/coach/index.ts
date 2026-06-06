@@ -7,4 +7,11 @@ export * from './types';
 export * from './thresholds';
 export * from './puzzleStats';
 export * from './gameStats';
+export * from './openingStats';
 export * from './coach';
+
+// Stage 5 — live coaching core (still engine-less + DOM-less: pure per-move math +
+// a thin, engine-agnostic single-position eval helper that talks to the injected
+// AnalysisEngine slice). The Coach UI on the Play tab consumes these.
+export * from './liveFeedback';
+export * from './evaluatePosition';

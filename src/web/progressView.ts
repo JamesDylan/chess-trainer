@@ -10,6 +10,7 @@ import { COACH_THRESHOLDS } from '../coach';
 import type {
   CoachingInsight,
   GamePhase,
+  OpeningStat,
   PhaseStat,
   ProgressSnapshot,
   RatingPoint,
@@ -53,6 +54,7 @@ export class ProgressView {
       ...(snapshot.insights.length > 0 ? [this.insightsEl(snapshot.insights)] : []),
       this.themesEl(snapshot.puzzles.themes),
       this.phasesEl(snapshot.games),
+      this.openingsEl(snapshot.openings),
     );
   }
 
@@ -271,6 +273,33 @@ export class ProgressView {
     wrap.appendChild(list);
     return wrap;
   }
+
+  private openingsEl(openings: OpeningStat[]): HTMLElement {
+    const wrap = document.createElement('div');
+    wrap.className = 'progress-section';
+    wrap.appendChild(sectionTitle('By opening', 'Your results, most-played first'));
+
+    if (openings.length === 0) {
+      wrap.appendChild(note('Finish some games (any result) to see win/loss by opening.'));
+      return wrap;
+    }
+    const list = document.createElement('div');
+    list.className = 'stat-rows';
+    for (const o of openings.slice(0, 10)) {
+      const acc = o.accuracy !== undefined ? ` · ${o.accuracy.toFixed(0)}% acc` : '';
+      list.appendChild(
+        statRow({
+          label: o.eco ? `${o.name} (${o.eco})` : o.name,
+          valueText: `${Math.round(o.score * 100)}%`,
+          fraction: o.score,
+          sub: `${o.games} games · ${o.wins}W ${o.losses}L ${o.draws}D${acc}`,
+          tone: openingTone(o.score),
+        }),
+      );
+    }
+    wrap.appendChild(list);
+    return wrap;
+  }
 }
 
 // --- small DOM helpers -------------------------------------------------------
@@ -347,6 +376,12 @@ function themeTone(solveRate: number): Tone {
 function phaseTone(accuracy: number): Tone {
   if (accuracy < COACH_THRESHOLDS.weakPhaseAccuracy) return 'weak';
   if (accuracy >= COACH_THRESHOLDS.strongPhaseAccuracy) return 'strong';
+  return 'ok';
+}
+
+function openingTone(score: number): Tone {
+  if (score < COACH_THRESHOLDS.weakOpeningScore) return 'weak';
+  if (score >= COACH_THRESHOLDS.strongOpeningScore) return 'strong';
   return 'ok';
 }
 

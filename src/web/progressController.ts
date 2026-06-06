@@ -12,7 +12,9 @@
 import type { PuzzleStore } from '../puzzles';
 import type { GameRepository } from '../persistence';
 import { ANALYSIS_REPORT_VERSION, type AnalysisStore } from '../analysis';
-import { buildProgressSnapshot, type AnalyzedGame, type ProgressSnapshot } from '../coach';
+import { buildProgressSnapshot, type AnalyzedGame, type GameOpeningRecord, type ProgressSnapshot } from '../coach';
+import { OpeningBook, SEED_OPENINGS, loadOpeningsFromJson } from '../openings';
+import { openingsUrl } from './config';
 
 export interface ProgressControllerDeps {
   puzzleStore: PuzzleStore;
@@ -26,6 +28,9 @@ export interface ProgressControllerCallbacks {
 }
 
 export class ProgressController {
+  /** Built once, lazily: prefers the full opening asset, else the built-in seed. */
+  private bookPromise?: Promise<OpeningBook>;
+
   constructor(
     private readonly deps: ProgressControllerDeps,
     private readonly cb: ProgressControllerCallbacks,
@@ -48,12 +53,52 @@ export class ProgressController {
       }
     }
 
+    // Opening detection over FINISHED games (a result is needed for win/loss). Pair in
+    // the user's analysed accuracy where available, for accuracy-by-opening.
+    const book = await this.getBook();
+    const accuracyByGame = new Map<number, number>();
+    for (const a of analyzedGames) {
+      const pr = a.game.humanColor === 'white' ? a.report.white : a.report.black;
+      accuracyByGame.set(a.game.id, pr.accuracy);
+    }
+    const gameOpenings: GameOpeningRecord[] = [];
+    for (const game of games) {
+      if (game.inProgress || game.result === '*') continue; // finished games only
+      const detected = book.detectFromPgn(game.pgn);
+      gameOpenings.push({
+        opening: detected ? { eco: detected.eco, name: detected.name } : undefined,
+        result: game.result,
+        humanColor: game.humanColor,
+        accuracy: accuracyByGame.get(game.id),
+      });
+    }
+
     const snapshot = buildProgressSnapshot({
       attempts,
       rating,
       analyzedGames,
       totalGames: games.length,
+      gameOpenings,
     });
     this.cb.onState(snapshot);
+  }
+
+  private getBook(): Promise<OpeningBook> {
+    return (this.bookPromise ??= this.loadBook());
+  }
+
+  /** Prefer the full opening asset (public/openings/openings.json); fall back to the
+   *  built-in seed so opening naming always works offline. */
+  private async loadBook(): Promise<OpeningBook> {
+    try {
+      const res = await fetch(openingsUrl());
+      if (res.ok) {
+        const defs = loadOpeningsFromJson(await res.text());
+        if (defs.length > 0) return new OpeningBook(defs);
+      }
+    } catch {
+      /* no asset / offline → fall back to the seed below */
+    }
+    return new OpeningBook(SEED_OPENINGS);
   }
 }

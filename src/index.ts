@@ -16,3 +16,7 @@ export * from './puzzles';
 // Stage 4 — coach layer (engine-less, DOM-less). Pure stats + rule-based coaching
 // over the puzzle attempt log, saved games, and cached analysis reports.
 export * from './coach';
+
+// Stage 4 (stretch) — opening detection (uses the ChessGame core only). Names the
+// opening a game reached, for win/loss-by-opening on the Progress tab.
+export * from './openings';

@@ -10,6 +10,7 @@
     "preview": "vite preview",
     "copy-engine": "node scripts/copy-engine.mjs",
     "build-puzzles": "node scripts/build-puzzles.mjs",
+    "build-openings": "node scripts/build-openings.mjs",
     "predev": "node scripts/copy-engine.mjs",
     "prebuild": "node scripts/copy-engine.mjs",
     "test": "vitest run",

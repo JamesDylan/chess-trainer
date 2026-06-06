@@ -42,3 +42,28 @@ export function puzzlesUrl(): URL {
 
 /** How many puzzles solved counts as hitting the daily target. */
 export const PUZZLE_DAILY_TARGET = 10;
+
+// --- Stage 5: live coaching -------------------------------------------------
+
+/** Depth for the live coach's single per-move search — the eval bar, the per-move
+ *  classification, AND the refutation PV all come from it, so it's kept SHALLOWER than
+ *  ANALYSIS_DEPTH to stay responsive (latency is felt every move). The rigorous, deeper
+ *  numbers live in the on-demand Analyze pass (ANALYSIS_DEPTH). */
+export const COACH_LIVE_DEPTH = 12;
+
+/** Per-eval search timeout for the dedicated coach engine. Generous: a search on the
+ *  single-threaded WASM build can take a couple of seconds in sharp positions. */
+export const COACH_SEARCH_TIMEOUT_MS = 60_000;
+
+/** Auto-enable Coach mode at or below this strength (beginners benefit most; it is
+ *  still a visible toggle they can switch off). Set to 0 to never auto-enable. */
+export const COACH_AUTO_ON_MAX_ELO = 1000;
+
+// --- Stage 4: openings ------------------------------------------------------
+
+/** Optional full opening book, served from public/openings (built by
+ *  scripts/build-openings.mjs). Fetched same-origin; the app falls back to the built-in
+ *  seed (src/openings/data.ts) when it's absent, so opening naming always works offline. */
+export function openingsUrl(): URL {
+  return new URL(`${import.meta.env.BASE_URL}openings/openings.json`, window.location.href);
+}

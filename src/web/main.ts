@@ -23,6 +23,8 @@ import type { PuzzleStore } from '../puzzles';
 import { BoardView, type Side } from './boardView';
 import { GameController, type StatusKind } from './gameController';
 import { AnalysisView } from './analysisView';
+import { CoachView } from './coachView';
+import { CoachController } from './coachController';
 import { PuzzleController } from './puzzleController';
 import { PuzzleView } from './puzzleView';
 import { ProgressController } from './progressController';
@@ -36,6 +38,9 @@ import {
   ANALYSIS_DEPTH,
   ANALYSIS_SEARCH_TIMEOUT_MS,
   puzzlesUrl,
+  COACH_LIVE_DEPTH,
+  COACH_SEARCH_TIMEOUT_MS,
+  COACH_AUTO_ON_MAX_ELO,
 } from './config';
 
 const app = document.querySelector<HTMLDivElement>('#app');
@@ -64,6 +69,9 @@ app.innerHTML = `
         </select>
       </label>
       <button id="new-game" type="button" disabled>New game</button>
+      <label class="coach-toggle" title="Live in-game coaching: eval bar, move feedback, and the best move when you slip">
+        <input type="checkbox" id="coach-mode" /> Coach
+      </label>
     </section>
 
     <p id="status" class="status" role="status" aria-live="polite">Loading engine…</p>
@@ -72,6 +80,7 @@ app.innerHTML = `
       <div class="board-col">
         <div class="captured" id="captured-top" aria-hidden="true"></div>
         <div class="board-wrap">
+          <div id="eval-bar" class="eval-bar" hidden aria-hidden="true"></div>
           <div id="board" class="cg-wrap"></div>
         </div>
         <div class="captured" id="captured-bottom" aria-hidden="true"></div>
@@ -95,6 +104,8 @@ app.innerHTML = `
           </div>
         </div>
       </div>
+      <!-- Coach feedback sits to the RIGHT of the board (two-column, like analysis). -->
+      <div id="coach-panel" class="coach-panel" hidden aria-live="polite"></div>
       <div id="analysis-root" class="analysis-root"></div>
     </div>
 
@@ -184,9 +195,14 @@ let controller: GameController;
 const board = new BoardView(boardEl, 'white', (from, to) => {
   void controller.handleUserMove(from, to);
 });
+// Stage 5 coach (created after the controller below); declared here so the controller
+// callback can forward "position settled" events to it once it exists.
+let coach: CoachController | null = null;
+
 controller = new GameController(board, repo, {
   onStatus: setStatus,
   onGameSaved: () => void refreshHistory(),
+  onCoachEval: (ctx) => coach?.onCoachEval(ctx),
   onViewUpdate: (v) => {
     undoEl.disabled = !v.canUndo;
     navFirstEl.disabled = !v.canBack;
@@ -243,6 +259,10 @@ const analysisView = new AnalysisView(analysisRootEl, {
 function hideAnalysis(): void {
   analysisView.hide();
   layoutEl.classList.remove('analyzing');
+  // Leaving/closing analysis (and the start of every New game / Resume / View) is the
+  // universal context switch — drop the coach's cache and neutralise its eval bar.
+  coach?.reset();
+  updateCoachLayout(); // restore the coach two-column layout if Coach is on
 }
 
 // A dedicated, full-strength analysis engine (its own Web Worker), booted lazily on
@@ -257,6 +277,63 @@ async function getAnalysisEngine(): Promise<UciEngine> {
   return analysisEngine;
 }
 
+// --- Stage 5: live coaching --------------------------------------------------
+
+// A DEDICATED full-strength coach engine in its OWN Web Worker, separate from the
+// limited-strength play engine (and from the analysis engine, so a paused coached game
+// and an Analyze pass can't interleave on one worker). Booted + configured to full
+// strength lazily, pre-warmed when Coach mode is toggled on, so it never slows load.
+let coachEngine: UciEngine | null = null;
+async function getCoachEngine(): Promise<UciEngine> {
+  if (!coachEngine) {
+    const e = await createWorkerEngine(engineWorkerUrl(), { searchTimeoutMs: COACH_SEARCH_TIMEOUT_MS });
+    await e.newGame();
+    await e.setStrength({ limitStrength: false, skillLevel: 20, movetimeMs: 1000, multipv: 1 });
+    coachEngine = e;
+  }
+  return coachEngine;
+}
+
+const evalBarEl = document.querySelector<HTMLDivElement>('#eval-bar')!;
+const coachPanelEl = document.querySelector<HTMLDivElement>('#coach-panel')!;
+const coachModeEl = document.querySelector<HTMLInputElement>('#coach-mode')!;
+const coachView = new CoachView(evalBarEl, coachPanelEl);
+coach = new CoachController(
+  controller,
+  coachView,
+  getCoachEngine,
+  { liveDepth: COACH_LIVE_DEPTH },
+  (text) => setStatus(text, 'info'),
+);
+
+// Two-column "coaching" layout (board + eval bar on the left, coach notes on the right,
+// like the analysis view) — on iff Coach is enabled AND we're not analysing. Toggling it
+// resizes the board, so chessground must re-measure or the pieces drift off the squares.
+function updateCoachLayout(): void {
+  const twoCol = !!coach?.isEnabled && !layoutEl.classList.contains('analyzing');
+  layoutEl.classList.toggle('coaching', twoCol);
+  requestAnimationFrame(() => board.redraw());
+}
+
+// Manual toggle (remembered, so the low-Elo auto-on never overrides an explicit choice).
+let coachToggledManually = false;
+coachModeEl.addEventListener('change', () => {
+  coachToggledManually = true;
+  coach?.setEnabled(coachModeEl.checked);
+  updateCoachLayout();
+});
+
+/** Apply Coach mode for a starting/resumed game: honour a manual choice, else auto-on
+ *  at low strength (beginners benefit most). Called before newGame/resume so the coach
+ *  can seed the eval bar from the opening position. */
+function syncCoachForNewGame(elo: number): void {
+  if (!coachToggledManually) {
+    coachModeEl.checked = COACH_AUTO_ON_MAX_ELO > 0 && elo <= COACH_AUTO_ON_MAX_ELO;
+  }
+  coach?.setEnabled(coachModeEl.checked);
+  updateCoachLayout();
+}
+
 let analyzing = false;
 let cancelAnalysis = false;
 
@@ -266,6 +343,7 @@ async function analyzeSavedGame(game: SavedGame): Promise<void> {
   cancelAnalysis = false;
   currentAnalysisOrientation = game.humanColor;
   layoutEl.classList.add('analyzing'); // two-column layout: board | report
+  updateCoachLayout(); // the analysis report owns the right column — drop coaching mode
   const meta = { strengthElo: game.strengthElo, humanColor: game.humanColor };
   try {
     // Instant re-open from cache when the saved game's moves are unchanged AND the
@@ -308,6 +386,7 @@ function selectedElo(): number {
 strengthEl.addEventListener('change', () => controller.setStrengthElo(selectedElo()));
 newGameEl.addEventListener('click', () => {
   hideAnalysis();
+  syncCoachForNewGame(selectedElo());
   void controller.newGame(selectedSide(), selectedElo());
 });
 saveGameEl.addEventListener('click', () => void controller.save());
@@ -394,6 +473,7 @@ function renderHistoryRow(game: SavedGame): HTMLLIElement {
       hideAnalysis();
       sideEl.value = game.humanColor;
       strengthEl.value = String(game.strengthElo);
+      syncCoachForNewGame(game.strengthElo);
       void controller.resume(game);
     });
   } else {
@@ -542,6 +622,7 @@ async function boot(): Promise<void> {
     resignEl.disabled = false;
     copyFenEl.disabled = false;
     copyPgnEl.disabled = false;
+    syncCoachForNewGame(selectedElo());
     await controller.newGame(selectedSide(), selectedElo());
   } catch (err) {
     setStatus(`Could not load the engine: ${(err as Error).message}`, 'error');

@@ -6,11 +6,13 @@
 import { initialRating, isEstablished } from '../core/rating';
 import { computePuzzleStats } from './puzzleStats';
 import { computeGameStats } from './gameStats';
+import { computeOpeningStats } from './openingStats';
 import { COACH_THRESHOLDS } from './thresholds';
 import type {
   CoachingInsight,
   Confidence,
   GameStats,
+  OpeningStat,
   ProgressSnapshot,
   PuzzleStats,
   SnapshotInput,
@@ -27,7 +29,11 @@ const CONFIDENCE_WEIGHT: Record<Confidence, number> = { low: 0.4, medium: 0.75, 
  *   - phase:    moves >= minPhaseMoves AND accuracy < weakPhaseAccuracy;
  *   - blunders: analysedGames >= minGamesForBlunderRate AND blundersPerGame >= highBlunderRate.
  */
-export function diagnoseWeaknesses(puzzles: PuzzleStats, games: GameStats): Weakness[] {
+export function diagnoseWeaknesses(
+  puzzles: PuzzleStats,
+  games: GameStats,
+  openings: OpeningStat[] = [],
+): Weakness[] {
   const out: Weakness[] = [];
 
   for (const t of puzzles.themes) {
@@ -80,6 +86,26 @@ export function diagnoseWeaknesses(puzzles: PuzzleStats, games: GameStats): Weak
       confidence: games.analyzedGames >= 3 ? 'high' : games.analyzedGames >= 2 ? 'medium' : 'low',
       sampleSize: games.analyzedGames,
       drillTheme: worst ?? undefined,
+    });
+  }
+
+  // 4. A low-scoring opening (enough games to mean something). No drill theme — puzzles
+  //    are filtered by tactic, not opening; the fix is study/review, not tactics reps.
+  const weakOpenings = openings.filter(
+    (o) => o.games >= COACH_THRESHOLDS.minOpeningGames && o.score < COACH_THRESHOLDS.weakOpeningScore,
+  );
+  if (weakOpenings.length > 0) {
+    const worst = [...weakOpenings].sort(
+      (a, b) => a.score - b.score || b.games - a.games || a.name.localeCompare(b.name),
+    )[0];
+    out.push({
+      id: `opening:${worst.name}`,
+      kind: 'opening',
+      label: worst.name,
+      detail: `${pct(worst.score)} score (${worst.wins}W / ${worst.losses}L / ${worst.draws}D) over ${worst.games} games`,
+      severity: 1 - worst.score,
+      confidence: worst.games >= 6 ? 'high' : worst.games >= 3 ? 'medium' : 'low',
+      sampleSize: worst.games,
     });
   }
 
@@ -138,7 +164,8 @@ export function buildInsights(
 export function buildProgressSnapshot(input: SnapshotInput): ProgressSnapshot {
   const puzzles = computePuzzleStats(input.attempts);
   const games = computeGameStats(input.analyzedGames, input.totalGames);
-  const weaknesses = diagnoseWeaknesses(puzzles, games);
+  const openings = computeOpeningStats(input.gameOpenings ?? []);
+  const weaknesses = diagnoseWeaknesses(puzzles, games, openings);
   const insights = buildInsights(weaknesses, puzzles, games);
   const rating = input.rating ?? initialRating();
 
@@ -156,6 +183,7 @@ export function buildProgressSnapshot(input: SnapshotInput): ProgressSnapshot {
     overallGameAccuracy: games.userAccuracy,
     puzzles,
     games,
+    openings,
     weaknesses,
     insights,
   };
@@ -177,6 +205,7 @@ function worstPhaseByBlunders(games: GameStats): string | null {
 function insightTitle(w: Weakness): string {
   if (w.kind === 'theme') return `Shore up your ${w.label.toLowerCase()} tactics`;
   if (w.kind === 'phase') return `Sharpen your ${w.label.toLowerCase()}`;
+  if (w.kind === 'opening') return `Patch up your ${w.label}`;
   return 'Cut down the blunders';
 }
 
@@ -189,6 +218,9 @@ function insightRecommendation(w: Weakness): string {
   if (w.kind === 'phase') {
     const phase = w.drillTheme ?? 'middlegame';
     return `Train ${phase} puzzles and slow down on your ${phase} decisions when you review games.`;
+  }
+  if (w.kind === 'opening') {
+    return `Study the ${w.label}: replay your analysed games in this line and learn its main plans and pawn breaks.`;
   }
   return `Before each move, check for opponent threats; drill ${
     w.drillTheme ?? 'tactical'

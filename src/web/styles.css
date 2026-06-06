@@ -583,3 +583,136 @@ button.puzzle-next { min-width: 8em; }
 .stat-bar-fill.tone-ok { background: var(--warn); }
 .tone-strong { color: var(--ok); }
 .stat-bar-fill.tone-strong { background: var(--ok); }
+
+/* --- Stage 5: live coaching (eval bar + coach line) ----------------------- */
+
+/* Coach toggle in the setup row. */
+.coach-toggle {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  color: var(--text);
+  font-size: 0.85rem;
+  cursor: pointer;
+  user-select: none;
+}
+.coach-toggle input { accent-color: var(--accent); width: 15px; height: 15px; }
+
+/* The board sits beside the eval bar; stretch the bar to the board's height. The board
+ * must NOT flex-shrink to make room for the bar — a non-square board throws chessground's
+ * piece placement off the squares. It keeps its explicit size; the column grows instead. */
+.board-wrap { gap: 8px; align-items: stretch; }
+.board-wrap .cg-wrap { flex: none; }
+
+/* Vertical White-POV eval bar (chess.com Play Coach style): black field, white fill
+ * from the bottom whose height = White's win%. `.flip` anchors it to the top when the
+ * board is oriented for Black, so the bar lines up with the pieces. */
+.eval-bar {
+  position: relative;
+  width: 16px;
+  flex: none;
+  align-self: stretch;
+  background: #111722;
+  border: 1px solid #3a4254;
+  border-radius: 4px;
+  overflow: hidden;
+}
+.eval-bar[hidden] { display: none; }
+.eval-bar-fill {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 50%;
+  background: #eef1f7;
+  transition: height 0.35s ease;
+}
+.eval-bar.flip .eval-bar-fill { bottom: auto; top: 0; }
+.eval-bar-label {
+  position: absolute;
+  left: 1px;
+  right: 1px;
+  bottom: 2px;
+  text-align: center;
+  font-size: 0.56rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  background: rgba(17, 23, 34, 0.78);
+  border-radius: 3px;
+  padding: 1px 0;
+  pointer-events: none;
+}
+
+/* Coach feedback line under the board. */
+.coach-panel { width: 100%; margin-top: 8px; }
+.coach-panel[hidden] { display: none; }
+.coach-feedback {
+  background: #232a38;
+  border-radius: 8px;
+  padding: 10px 12px;
+  border-left: 3px solid var(--accent);
+}
+.coach-line { font-size: 0.86rem; }
+.coach-thinking { color: var(--muted); font-style: italic; }
+.coach-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.coach-badge {
+  flex: none;
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 999px;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+.coach-badge.tone-good { background: rgba(152, 195, 121, 0.18); color: var(--ok); }
+.coach-badge.tone-ok { background: rgba(110, 168, 254, 0.18); color: var(--accent); }
+.coach-badge.tone-warn { background: rgba(229, 192, 123, 0.2); color: var(--warn); }
+.coach-badge.tone-bad { background: rgba(224, 108, 117, 0.2); color: var(--danger); }
+.coach-headline { font-weight: 600; font-size: 0.9rem; }
+.coach-detail { color: var(--muted); font-size: 0.82rem; margin-top: 5px; }
+.coach-metrics { font-size: 0.8rem; margin-top: 4px; font-variant-numeric: tabular-nums; }
+.coach-actions { display: flex; gap: 8px; margin-top: 10px; }
+.coach-actions button { padding: 6px 12px; font-size: 0.82rem; }
+.coach-idle { color: var(--muted); font-style: italic; }
+
+/* The live-coach UI is irrelevant while the analysis report owns the board. */
+.layout.analyzing #eval-bar,
+.layout.analyzing #coach-panel { display: none; }
+
+/* --- Coach two-column layout: board | coach notes (mirrors .analyzing) ------ */
+/* On while Coach is enabled (and not analysing): a wider page, a BIGGER board on the
+ * left, and the coach notes in a sticky right column — easier to read and to play. */
+.layout.coaching { max-width: 1040px; }
+.layout.coaching .play-area {
+  display: flex;
+  gap: 18px;
+  align-items: flex-start;
+}
+.layout.coaching .board-col {
+  flex: 0 0 auto;
+  width: auto;            /* size to board + eval bar so the board never compresses */
+  margin: 0;
+  position: sticky;
+  top: 12px;
+}
+.layout.coaching .cg-wrap {
+  width: min(56vw, 540px);
+  height: min(56vw, 540px);
+}
+.layout.coaching #coach-panel {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin-top: 0;
+  position: sticky;
+  top: 12px;
+}
+
+/* Narrow screens: stack the coach notes under the board (no sticky), board back to base. */
+@media (max-width: 880px) {
+  .layout.coaching { max-width: 560px; }
+  .layout.coaching .play-area { flex-direction: column; }
+  .layout.coaching .board-col { position: static; margin: 0 auto; }
+  .layout.coaching .cg-wrap { width: min(82vw, 480px); height: min(82vw, 480px); }
+  .layout.coaching #coach-panel { position: static; width: 100%; }
+}

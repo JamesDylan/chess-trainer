@@ -46,12 +46,34 @@ export interface ViewState {
   orientation: Side;
 }
 
+/**
+ * Stage 5 hook: a "position settled" event the live coach listens to. Fired AFTER a
+ * move is applied and rendered (never mid-search). When `isHumanMove` the coach
+ * reviews the move just played (eval the post-move position for the bar + use the
+ * cached pre-move eval as scoreBefore); otherwise (engine reply / game start) the
+ * coach just refreshes the eval bar and caches the new pre-move eval.
+ */
+export interface CoachMoveContext {
+  /** FEN before the move that produced `fenAfter` (undefined at game start). */
+  fenBefore?: string;
+  /** FEN now on the board — the position to evaluate. */
+  fenAfter: string;
+  /** The move just played (UCI), undefined at game start. */
+  uci?: string;
+  /** Who played it (undefined at game start). */
+  mover?: Side;
+  /** True when this was the HUMAN's move (the coach reviews these). */
+  isHumanMove: boolean;
+}
+
 export interface ControllerCallbacks {
   onStatus(text: string, kind: StatusKind): void;
   /** Called after a game is saved/updated, so the UI can refresh its list. */
   onGameSaved(): void;
   /** Called on every render with the current view state (buttons, captured pieces). */
   onViewUpdate(view: ViewState): void;
+  /** Stage 5: a settled position to coach (only fired while Coach mode is on). */
+  onCoachEval?(ctx: CoachMoveContext): void;
 }
 
 export class GameController {
@@ -76,6 +98,13 @@ export class GameController {
   private generation = 0;
   // Id of this game's persisted record (in-progress or finished), once saved.
   private currentId?: number;
+  // Stage 5 — Coach mode. When on, after a human move the controller hands the turn
+  // to the coach (via onCoachEval) instead of auto-replying; the coach calls
+  // requestEngineReply() to continue. `liveShapes` are the coach's green/red arrows,
+  // drawn on the live board and cleared on every new move. Both default to off/empty,
+  // so when Coach mode is never enabled the play loop is byte-for-byte the original.
+  private coachMode = false;
+  private liveShapes: BoardShape[] = [];
 
   constructor(
     private readonly board: BoardView,
@@ -89,6 +118,60 @@ export class GameController {
 
   get currentStrength(): number {
     return this.strengthElo;
+  }
+
+  // --- Stage 5: Coach mode seam (additive) -----------------------------------
+
+  /** Enable/disable Coach mode. When ON, the play loop hands the post-human-move
+   *  turn to the coach (onCoachEval) instead of auto-replying. OFF restores the
+   *  original behaviour exactly and clears any coach arrows. */
+  setCoachMode(on: boolean): void {
+    this.coachMode = on;
+    if (!on) {
+      this.liveShapes = [];
+      this.render();
+    }
+  }
+
+  /** Whether Coach mode is currently on. */
+  get coachEnabled(): boolean {
+    return this.coachMode;
+  }
+
+  /** Side shown at the bottom of the board (= the human's color) — for the eval bar. */
+  get orientation(): Side {
+    return this.humanColor;
+  }
+
+  /** Draw the coach's arrows on the live board (green best move / red refutation).
+   *  Replaces any previous set; pass [] to clear. Only visible at the live position. */
+  setLiveShapes(shapes: BoardShape[]): void {
+    this.liveShapes = shapes;
+    this.render();
+  }
+
+  /** Trigger the engine's reply on demand — the coach calls this to "Continue" after
+   *  reviewing the human's move. No-op unless it's genuinely the engine's turn in a
+   *  live, unfinished game (so a stray call can never inject an out-of-turn move). */
+  requestEngineReply(): void {
+    if (!this.engine || this.viewing || this.reviewing || this.finalized || this.resigned) return;
+    if (this.game.isGameOver() || !this.isLive()) return;
+    if (this.game.turn() === this.humanColor) return; // not the engine's turn
+    void this.engineMove();
+  }
+
+  /** Whether it is currently the human's turn at the live position (used by the coach
+   *  when it is toggled on mid-game to decide whether to seed a pre-move eval). */
+  isHumanToMove(): boolean {
+    return (
+      !this.viewing &&
+      !this.reviewing &&
+      !this.finalized &&
+      !this.resigned &&
+      this.isLive() &&
+      !this.game.isGameOver() &&
+      this.game.turn() === this.humanColor
+    );
   }
 
   /** Update the strength for the NEXT game; apply immediately if no moves played. */
@@ -123,6 +206,7 @@ export class GameController {
     this.currentId = undefined;
     this.viewIndex = 0;
     this.finalStatus = undefined;
+    this.liveShapes = [];
 
     await this.engine.newGame();
     await this.engine.setStrength(eloToEngineOptions(elo));
@@ -130,6 +214,8 @@ export class GameController {
 
     // If the human chose Black, the engine (White) moves first.
     if (this.game.turn() !== this.humanColor) void this.engineMove();
+    // Otherwise seed the coach's eval bar from the start position (human to move).
+    else if (this.coachMode) this.cb.onCoachEval?.({ fenAfter: this.game.fen(), isHumanMove: false });
   }
 
   /** Resume a saved in-progress game into a PLAYABLE state. */
@@ -158,12 +244,16 @@ export class GameController {
     this.currentId = saved.id;
     this.viewIndex = game.history().length; // show the latest position
     this.finalStatus = undefined;
+    this.liveShapes = [];
 
     await this.engine.newGame();
     await this.engine.setStrength(eloToEngineOptions(this.strengthElo));
     this.render();
 
     if (!this.game.isGameOver() && this.game.turn() !== this.humanColor) void this.engineMove();
+    // Resumed on the human's turn: seed the coach's eval bar for the current position.
+    else if (this.coachMode && !this.game.isGameOver())
+      this.cb.onCoachEval?.({ fenAfter: this.game.fen(), isHumanMove: false });
   }
 
   /** Read-only review of a finished game (shows the final position). */
@@ -185,6 +275,7 @@ export class GameController {
     this.lastMove = undefined;
     this.currentId = undefined;
     this.viewIndex = game.history().length;
+    this.liveShapes = [];
     this.render();
     this.cb.onStatus(`Viewing saved game (${game.result()}). Start a new game to play.`, 'info');
   }
@@ -250,6 +341,7 @@ export class GameController {
     this.generation++; // discard any in-flight engine reply
     this.resigned = true;
     this.thinking = false;
+    this.liveShapes = [];
     const result: GameResult = this.humanColor === 'white' ? '0-1' : '1-0';
     await this.finalize(result, 'You resigned — engine wins.');
   }
@@ -300,6 +392,9 @@ export class GameController {
     this.undoUsed = true;
     this.lastMove = undefined;
     this.finalStatus = undefined;
+    // Keep the coach's GREEN best-move arrow (it points to the move to play at the
+    // position we've returned to); drop any red refutation arrow (now stale).
+    this.liveShapes = this.liveShapes.filter((s) => s.brush === 'green');
     this.viewIndex = this.liveLen(); // back to the (new) live position, human to move
     this.render();
     this.cb.onStatus('Move taken back — your turn again.', 'info');
@@ -308,6 +403,11 @@ export class GameController {
     // in-progress, carrying the undo flag). A never-saved game stays unsaved here;
     // the flag travels with it whenever it is next persisted.
     if (this.currentId != null) await this.persist('*', true);
+
+    // Coach mode: refresh the eval bar for the position we've returned to.
+    if (this.coachMode && this.cb.onCoachEval) {
+      this.cb.onCoachEval({ fenAfter: this.game.fen(), isHumanMove: false });
+    }
   }
 
   // --- move navigation (read-only browsing of the live game) -----------------
@@ -398,16 +498,32 @@ export class GameController {
       uci = from + to + piece;
     }
 
+    const fenBefore = this.game.fen(); // the position the human faced (coach scoreBefore)
     if (!this.game.move(uci)) {
       this.render(); // illegal (shouldn't happen given dests): snap back
       return;
     }
     this.lastMove = [from, to];
+    this.liveShapes = []; // a new move clears the previous coach arrows
     this.viewIndex = this.liveLen(); // stay at the live position
     this.render();
 
     if (this.game.isGameOver()) {
       await this.finishNatural();
+      return;
+    }
+    // Coach mode: hand the turn to the coach to review this move; it calls
+    // requestEngineReply() to continue (immediately for a clean move, or after the
+    // user picks Continue/Retry on a slip). Off (or no coach wired): auto-reply exactly
+    // as before — the `onCoachEval` guard guarantees the game can never be stranded.
+    if (this.coachMode && this.cb.onCoachEval) {
+      this.cb.onCoachEval({
+        fenBefore,
+        fenAfter: this.game.fen(),
+        uci,
+        mover: this.humanColor,
+        isHumanMove: true,
+      });
       return;
     }
     void this.engineMove();
@@ -416,6 +532,9 @@ export class GameController {
   private async engineMove(): Promise<void> {
     if (!this.engine) return;
     const gen = this.generation;
+    // NB: coach arrows are intentionally NOT cleared here — they're left on the board
+    // through the engine's reply so the human can read the feedback and choose to Undo.
+    // They're cleared on the next human move (handleUserMove) and on game changes.
     this.thinking = true;
     this.render();
     this.cb.onStatus(`Engine (~${this.strengthElo}) is thinking…`, 'thinking');
@@ -437,6 +556,7 @@ export class GameController {
     // Follow the new move only if the player was watching the live position; if they
     // had stepped back to browse, leave them there (they can step forward to it).
     const follow = this.isLive();
+    const fenBeforeEngine = this.game.fen(); // position the engine moved from (coach scoreBefore for the human's next turn)
 
     // THE GATE: applying the engine's move must succeed (legal in this position).
     const legal = this.game.move(best);
@@ -453,7 +573,22 @@ export class GameController {
     this.thinking = false;
     this.render();
 
-    if (this.game.isGameOver()) await this.finishNatural();
+    if (this.game.isGameOver()) {
+      await this.finishNatural();
+      return;
+    }
+    // Coach mode: refresh the eval bar for the position the human now faces (and seed
+    // the next pre-move eval). Not a review — the coach only critiques the human.
+    if (this.coachMode) {
+      const engineColor: Side = this.humanColor === 'white' ? 'black' : 'white';
+      this.cb.onCoachEval?.({
+        fenBefore: fenBeforeEngine,
+        fenAfter: this.game.fen(),
+        uci: best,
+        mover: engineColor,
+        isHumanMove: false,
+      });
+    }
   }
 
   private async finishNatural(): Promise<void> {
@@ -524,6 +659,8 @@ export class GameController {
       dests: playable ? dests : new Map(),
       lastMove,
       inCheck,
+      // Coach arrows only at the live position (never while browsing history).
+      shapes: live && this.coachMode ? this.liveShapes : undefined,
     });
 
     // Status priority: browsing > thinking (owned by engineMove) > finished > turn.

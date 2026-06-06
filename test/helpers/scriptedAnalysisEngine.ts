@@ -19,11 +19,17 @@ function scoreField(score: Score): string {
  * Build a responder that returns `scoreForFen(fen)` for each searched position.
  * `fen` is the exact string the analyzer sent after `position fen `. Optionally
  * `bestForFen(fen)` supplies the engine's best move (UCI) for that position; it
- * defaults to `e2e4`, and is echoed both in the `pv` and the `bestmove` line.
+ * defaults to `e2e4`, and is echoed in the `bestmove` line.
+ *
+ * Optionally `pvForFen(fen)` supplies the FULL principal variation (UCI moves) for
+ * that position — used by the Stage 5 live coach to read a refutation off the PV.
+ * When omitted, the PV is just `[best]` (a single-move line, as before), so existing
+ * callers are unaffected.
  */
 export function scriptedAnalysisResponder(
   scoreForFen: (fen: string) => Score,
   bestForFen: (fen: string) => string = () => 'e2e4',
+  pvForFen?: (fen: string) => string[],
 ): Responder {
   let pendingFen = '';
   return (command, emit) => {
@@ -40,7 +46,10 @@ export function scriptedAnalysisResponder(
     } else if (command.startsWith('go')) {
       const field = scoreField(scoreForFen(pendingFen));
       const best = bestForFen(pendingFen);
-      emit(`info depth 16 seldepth 22 multipv 1 score ${field} nodes 100000 nps 1000000 time 50 pv ${best}`);
+      const pv = pvForFen?.(pendingFen) ?? [best];
+      emit(
+        `info depth 16 seldepth 22 multipv 1 score ${field} nodes 100000 nps 1000000 time 50 pv ${pv.join(' ')}`,
+      );
       emit(`bestmove ${best}`);
     }
     // setoption / ucinewgame are accepted silently.

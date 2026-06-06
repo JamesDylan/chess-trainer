@@ -32,6 +32,14 @@ export const COACH_THRESHOLDS = {
   /** Minimum analysed games before the blunder rate is judged at all. */
   minGamesForBlunderRate: 1,
 
+  // --- openings --------------------------------------------------------------
+  /** Min finished games in an opening before its score can flag a weakness. */
+  minOpeningGames: 3,
+  /** User score (wins + ½·draws)/games strictly below this ⇒ a weak opening. */
+  weakOpeningScore: 0.45,
+  /** Score at/above this ⇒ a strong opening (for the UI tone). */
+  strongOpeningScore: 0.55,
+
   // --- coaching output -------------------------------------------------------
   /** Cap on emitted insights (the UI shows the top 2–4). */
   maxInsights: 4,

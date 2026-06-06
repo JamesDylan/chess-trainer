@@ -9,6 +9,7 @@ import type { PuzzleAttempt } from '../puzzles/types';
 import type { GameReport } from '../analysis/types';
 import type { SavedGame } from '../persistence/types';
 import type { RatingState } from '../core/rating';
+import type { Color, GameResult } from '../core/types';
 
 /** The three coarse phases of a game (see gameStats.phaseOf for the documented cut). */
 export type GamePhase = 'opening' | 'middlegame' | 'endgame';
@@ -123,11 +124,44 @@ export interface GameStats {
   vsStrength: StrengthStat[];
 }
 
+/** A reference to a named opening (ECO optional). Mirrors src/openings' OpeningId but is
+ *  redeclared here so the coach layer stays free of the chess.js-backed openings seam. */
+export interface OpeningRef {
+  eco?: string;
+  name: string;
+}
+
+/** One finished game reduced to what opening stats need (detected outside the coach). */
+export interface GameOpeningRecord {
+  /** The detected opening, or undefined if unrecognised. */
+  opening?: OpeningRef;
+  /** Final result of the game. */
+  result: GameResult;
+  /** Which side the user played. */
+  humanColor: Color;
+  /** The user's game accuracy% if the game was analysed (for accuracy-by-opening). */
+  accuracy?: number;
+}
+
+/** Win/loss aggregate for one opening, from the USER's point of view. */
+export interface OpeningStat {
+  name: string;
+  eco?: string;
+  games: number;
+  wins: number;
+  losses: number;
+  draws: number;
+  /** (wins + 0.5·draws) / games, in [0,1]. */
+  score: number;
+  /** Mean user accuracy% across analysed games in this opening; undefined if none. */
+  accuracy?: number;
+}
+
 /** A diagnosed weakness. Ranked by `severity` × confidence weight. */
 export interface Weakness {
-  /** Stable id, e.g. "theme:fork", "phase:endgame", "blunders". */
+  /** Stable id, e.g. "theme:fork", "phase:endgame", "blunders", "opening:Sicilian Defense". */
   id: string;
-  kind: 'theme' | 'phase' | 'blunders';
+  kind: 'theme' | 'phase' | 'blunders' | 'opening';
   /** Short human label, e.g. "Fork" or "Endgame play". */
   label: string;
   /** One-line evidence, e.g. "solved 9/22 (41%) on fork puzzles". */
@@ -166,6 +200,8 @@ export interface ProgressSnapshot {
   overallGameAccuracy?: number;
   puzzles: PuzzleStats;
   games: GameStats;
+  /** Win/loss by opening, most-played first. */
+  openings: OpeningStat[];
   /** Ranked worst-first. */
   weaknesses: Weakness[];
   /** The top 2–4 prioritised coaching messages. */
@@ -187,4 +223,7 @@ export interface SnapshotInput {
   analyzedGames: AnalyzedGame[];
   /** Count of saved games (analysed or not), for the "games played" headline. */
   totalGames: number;
+  /** Finished games reduced to opening + result + color (detected outside the coach).
+   *  Optional so existing callers/tests need not supply it. */
+  gameOpenings?: GameOpeningRecord[];
 }

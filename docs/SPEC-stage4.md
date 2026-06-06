@@ -166,10 +166,11 @@ points from the FEN (Q9 R5 B3 N3; kings + pawns excluded; full board = 62).
 
 ```
 npm install
-npm test                          # 141 passed (113 + 28 new) — fast, offline, no WASM
+npm test                          # 161 passed (113 + 28 coach/stats + 20 openings) — offline, no WASM
 npm run typecheck                 # clean
 npm run dev                       # solve puzzles (incl. a few misses across ≥2 themes),
                                   # Analyze ≥1 saved game, open Progress; click "Drill this"
+npm run build-openings            # (optional) full ECO opening set → public/openings/openings.json
 npm run build && npm run preview  # disconnect the network, confirm Progress works offline
 ```
 
@@ -180,10 +181,12 @@ Stages 2–3:
 
 - **Typecheck:** `tsc --noEmit` **clean** across the whole repo (strict, DOM lib),
   including the new coach core, the Progress UI, and the 3 new test files.
-- **Pure logic (transpiled to CJS, run through Node):** all **28 new unit tests pass
-  (28/28)** under a minimal `vitest` shim — the rating series, per-theme/per-band stats,
-  the phase cut + per-phase accuracy, the weakness ranking + its min-sample threshold, and
-  that insights/recommendations fire **exactly** on the documented thresholds.
+- **Pure logic (transpiled to CJS, run through Node):** all **48 Stage-4 unit tests pass
+  (48/48)** under a minimal `vitest` shim (28 coach/stats + 20 openings) — the rating
+  series, per-theme/per-band stats, the phase cut + per-phase accuracy, the weakness
+  ranking + its min-sample threshold, opening detection + win/loss aggregation, and that
+  insights/recommendations fire **exactly** on the documented thresholds. (The openings
+  tests load `chess.js` from the repo `node_modules` via `NODE_PATH`.)
 - **Store back-compat:** transpiled `puzzleStore.ts` and confirmed a legacy attempt (no
   `themes`/`assisted`) reads back as `[]`/`false` while new rows preserve their values and
   ordering is kept.
@@ -215,4 +218,77 @@ mount — clear any stale `.git/index.lock` first.)
 - **Stretches not taken** (left as future work, all noted in the brief): activity
   heatmap/calendar, user-set goals, a "review your worst blunders" jump onto the analysis
   board, spaced-repetition re-queue of missed puzzles, and an exportable progress report.
-```
+
+---
+
+## Stretch delivered: win/loss by opening + opening coaching
+
+Added after the first acceptance pass (user request): name the opening each game reached
+and show **win/loss by opening**, plus an opening-based coaching insight. Fully offline,
+deterministic — opening ID is a **static book lookup**, no LLM/web.
+
+### New seam: `src/openings/` (pure; uses the ChessGame core only)
+- **`data.ts`** — a committed **seed book** (~60 openings) covering every common family +
+  popular mainlines (Scotch, Scandinavian, French incl. Winawer, Sicilian incl. Najdorf/
+  Dragon, Ruy Lopez, Italian, Caro-Kann, QGD/Slav/QGA, Nimzo/QID/KID/Grünfeld, English,
+  Réti, London, Dutch, …). Names follow common usage; ECO codes are the standard ranges.
+  Ships in-repo so opening naming works out of the box, like the puzzle seed.
+- **`book.ts`** — `OpeningBook` builds a `Map<EPD, OpeningId>` by replaying each line via
+  `ChessGame` (the single chess.js seam); `epdOf` = the first four FEN fields (counters
+  dropped). `detectFromPgn` / `detectFromSans` return the **deepest** named position a game
+  reaches, so a deep mainline is named precisely while a game that leaves book early still
+  gets its **family** name, and transpositions match by position. Pure + deterministic.
+- **`loader.ts`** — `loadOpeningsFromJson` (+ `normalizeOpeningMoves`) expands the optional
+  full asset (accepts Lichess-style `pgn` or bare `moves`).
+- **`scripts/build-openings.mjs`** (Mac, Node built-ins only) — converts the Lichess
+  `chess-openings` TSVs (CC0) into `public/openings/openings.json` (the full ~3,500-line
+  ECO set). The app **prefers this asset** when present (fetched same-origin) and falls
+  back to the seed otherwise. New `npm run build-openings` script.
+
+### Coach additions (still pure, no chess.js)
+- `OpeningRef` / `GameOpeningRecord` / `OpeningStat` types; `SnapshotInput.gameOpenings?`
+  and `ProgressSnapshot.openings`.
+- **`openingStats.ts`** — `computeOpeningStats` folds finished games into per-opening
+  **W / L / D + score** `(wins + ½·draws)/games` from the **user's** point of view
+  (`humanOutcome`), with mean accuracy over analysed games; sorted most-played first.
+  Detection runs OUTSIDE the coach (in the controller), so the coach stays chess.js-free.
+- `coach.ts` adds an **opening weakness** (a line scoring `< weakOpeningScore` over
+  `≥ minOpeningGames`) to the ranked list + a "Patch up your <opening>" insight (no drill
+  theme — puzzles filter by tactic, not opening; the fix is study/review). New thresholds:
+  `minOpeningGames = 3`, `weakOpeningScore = 0.45`, `strongOpeningScore = 0.55`.
+
+### UI
+`ProgressController` builds the book lazily (asset → seed fallback), detects each finished
+game's opening, attaches analysed accuracy, and passes the records to the snapshot.
+`progressView` renders a **"By opening"** section: per-opening score%, `gamesW/L/D`, and
+accuracy, toned weak/ok/strong. Reuses the existing stat-row styles.
+
+### New tests (offline, no WASM) — `npm test` **141 → 161** (20 new)
+- **`test/openings.test.ts`** (12) — seed integrity (every line legal SAN, all positions
+  distinct); `epdOf`; detection of Scotch / Scandinavian / **French Winawer** (deepest at
+  ply 6) / Najdorf (deep exact) / family fallback / **transposition** (Four Knights by
+  position) / unknown + empty; PGN detection; loader round-trip.
+- **`test/openingStats.test.ts`** (8) — `humanOutcome`; W/L/D + score aggregation from the
+  user POV (incl. black wins, skipping unrecognised + unfinished); accuracy averaging;
+  the opening-weakness threshold (fires at `≥ minOpeningGames` + `< weakOpeningScore`, with
+  **no** drill theme; suppressed below the game floor); snapshot integration; empty-safe.
+
+### Caveats
+- The **seed** names families and common mainlines; for fine-grained variation names run
+  `npm run build-openings` to ship the full ECO set (the app then prefers it).
+- Opening detection keys on the **exact position** (EPD incl. castling/en-passant), matching
+  Lichess's approach — transpositions that differ only by en-passant square are treated as
+  distinct positions, which is standard.
+- Opening insights have **no "Drill this"**: puzzles are filtered by tactical theme, not by
+  opening, so the actionable advice is to study/replay games in that line rather than do
+  tactics reps. (Wiring the Lichess puzzle `OpeningTags` into the puzzle pipeline would
+  enable opening-filtered drilling — a future enhancement.)
+
+---
+
+## Next up (scoped, not built)
+
+- **Stage 5 — Coaching Mode** (live in-game coaching: eval bar, per-move cp/accuracy, the
+  best move when you slip, a red "why" arrow from the engine PV on a blunder, and
+  missed-opportunity prompts — "you had a chance to play checkmate; undo and try to find
+  it?"). Full paste-ready brief: **docs/PROMPT-stage5-coaching.md**.

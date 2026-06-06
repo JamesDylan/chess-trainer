@@ -243,8 +243,13 @@ function aggregate(moves: MoveAnalysis[], color: Color): PlayerReport {
   };
 }
 
-/** Mover-POV centipawn loss (>= 0) for ACPL. Mate/terminal map to a bounded ±CP_CEILING. */
-function centipawnLoss(
+/**
+ * Mover-POV centipawn loss (>= 0) for ACPL. Mate/terminal map to a bounded ±CP_CEILING.
+ * Exported so the live coach (Stage 5) computes cp loss with the EXACT same convention
+ * instead of forking the math — pass `terminalAfter: undefined` for a live, non-terminal
+ * post-move position.
+ */
+export function centipawnLoss(
   scoreBefore: Score,
   scoreAfter: Score,
   terminalAfter: TerminalKind | undefined,
@@ -257,8 +262,9 @@ function centipawnLoss(
   return Math.max(0, cpBefore - cpAfter);
 }
 
-/** Bounded centipawns from a Score (side-to-move POV). Mate -> ±CP_CEILING. */
-function scoreToCp(score: Score): number {
+/** Bounded centipawns from a Score (side-to-move POV). Mate -> ±CP_CEILING.
+ *  Exported for reuse by the Stage 5 live coach (shared, not re-derived). */
+export function scoreToCp(score: Score): number {
   if (score.cp !== undefined) {
     return Math.max(-CP_CEILING, Math.min(CP_CEILING, score.cp));
   }

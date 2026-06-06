@@ -9,6 +9,9 @@ export {
   DEFAULT_ANALYSIS_DEPTH,
   ANALYSIS_REPORT_VERSION,
   inferLastMove,
+  // Bounded-cp helpers, shared with the Stage 5 live coach (not re-derived there).
+  scoreToCp,
+  centipawnLoss,
 } from './analyzer';
 export type { AnalysisStore } from './analysisStore';
 export { InMemoryAnalysisStore, IndexedDbAnalysisStore } from './analysisStore';
